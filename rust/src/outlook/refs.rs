@@ -56,11 +56,16 @@ impl MailRefs {
     }
 
     fn compact_item(&mut self, item: &mut Map<String, Value>) {
-        let Some(entry_id) = item.get("entry_id").and_then(Value::as_str).map(str::to_owned) else {
+        let Some(entry_id) = item
+            .get("entry_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
             return;
         };
         // Never publish the full StoreID even for items that have no EntryID.
-        let store_id = item.remove("store_id")
+        let store_id = item
+            .remove("store_id")
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_default();
 
@@ -75,7 +80,9 @@ impl MailRefs {
     }
 
     pub fn compact_response(&mut self, response: &mut Value) {
-        let Value::Object(root) = response else { return; };
+        let Value::Object(root) = response else {
+            return;
+        };
         if let Some(Value::Array(items)) = root.get_mut("items") {
             for item in items {
                 if let Value::Object(item) = item {
@@ -91,7 +98,11 @@ impl MailRefs {
         let id = &params.entry_id;
         if let Some((entry, store)) = self.by_handle.get(id) {
             params.entry_id = entry.clone();
-            params.store_id = if store.is_empty() { None } else { Some(store.clone()) };
+            params.store_id = if store.is_empty() {
+                None
+            } else {
+                Some(store.clone())
+            };
             return Ok(());
         }
         // Reject stale server-generated handles. Raw Outlook EntryIDs are

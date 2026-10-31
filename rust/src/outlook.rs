@@ -9,11 +9,11 @@ use serde_json::Value;
 #[path = "outlook/mailbox.rs"]
 mod mailbox;
 #[cfg(windows)]
-#[path = "outlook/table.rs"]
-mod table;
-#[cfg(windows)]
 #[path = "outlook/refs.rs"]
 mod refs;
+#[cfg(windows)]
+#[path = "outlook/table.rs"]
+mod table;
 use serde::Serialize;
 use std::{
     sync::mpsc::{self, Receiver, Sender},
@@ -226,8 +226,8 @@ fn run_worker(receiver: Receiver<Request>) {
 
 #[cfg(windows)]
 mod win {
-    use super::refs::MailRefs;
     use super::OutlookProbe;
+    use super::refs::MailRefs;
     use anyhow::{Context, Result};
     use std::ptr;
     use windows::{

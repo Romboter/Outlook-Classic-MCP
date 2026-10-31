@@ -32,16 +32,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-      - name: Format Rust source for compact references (temporary)
-        run: cargo fmt --manifest-path rust/Cargo.toml --all
-      - name: Emit formatted compact reference files (temporary)
-        shell: pwsh
-        run: |
-          foreach ($file in @('rust/src/outlook/refs.rs', 'rust/src/outlook.rs', 'rust/src/outlook/mailbox.rs', 'rust/src/contracts.rs', 'rust/src/lib.rs')) {
-            Write-Output "BEGIN_REF_STAGE $file"
-            Write-Output ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $file))))
-            Write-Output "END_REF_STAGE $file"
-          }
       - name: Check formatting
         run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
       - name: Lint

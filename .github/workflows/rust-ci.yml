@@ -32,14 +32,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-      - name: Generate updated lockfile for schemars direct dependency (temporary)
-        run: cargo generate-lockfile --manifest-path rust/Cargo.toml
-      - name: Emit updated Cargo.lock for review (temporary)
-        shell: pwsh
-        run: |
-          Write-Output 'BEGIN_SCHEMA_LOCK'
-          Write-Output ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path rust/Cargo.lock))))
-          Write-Output 'END_SCHEMA_LOCK'
       - name: Check formatting
         run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
       - name: Lint

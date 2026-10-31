@@ -202,7 +202,7 @@ fn list_folders(namespace: &IDispatch, params: FolderParams) -> Result<Value> {
             return Ok(());
         }
         let folders = win::object_property(folder, "Folders")?;
-        let count = win::int_property(&folders, "Count")?.max(0).min(100);
+        let count = win::int_property(&folders, "Count")?.clamp(0, 100);
         for i in 1..=count {
             if rows.len() >= 100 {
                 break;

@@ -34,6 +34,13 @@ jobs:
           workspaces: rust
       - name: Generate provisional lockfile (must be committed before closing #2)
         run: cargo generate-lockfile --manifest-path rust/Cargo.toml
+      - name: Emit provisional lockfile for review (temporary)
+        shell: pwsh
+        run: |
+          Write-Output 'BEGIN_OUTLOOK_LOCKFILE_B64'
+          $raw = [System.IO.File]::ReadAllBytes((Resolve-Path rust/Cargo.lock))
+          Write-Output ([Convert]::ToBase64String($raw))
+          Write-Output 'END_OUTLOOK_LOCKFILE_B64'
       - name: Check formatting
         run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
       - name: Lint

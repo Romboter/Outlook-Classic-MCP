@@ -98,7 +98,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "List up to 30 matching mail summaries in an Outlook Classic folder; body content omitted."
+        description = "List up to 30 metadata-only mail summaries in one folder. Uses lightweight Folder.GetTable rows when supported; accepts backend auto/table/legacy."
     )]
     async fn outlook_list_mails(
         &self,
@@ -108,7 +108,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Search a single Outlook Classic folder using the existing Outlook Restrict query (indexed search optimization pending); return small metadata-only hits."
+        description = "Search one Outlook Classic folder with Table rows for subject/sender, or the legacy body-inclusive fallback. Returns compact metadata-only hits and measured elapsed_ms; accepts backend auto/table/legacy."
     )]
     async fn outlook_search_mails(
         &self,

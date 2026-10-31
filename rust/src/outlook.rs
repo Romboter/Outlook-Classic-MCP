@@ -14,6 +14,9 @@ mod refs;
 #[cfg(windows)]
 #[path = "outlook/table.rs"]
 mod table;
+#[cfg(windows)]
+#[path = "outlook/indexed.rs"]
+mod indexed;
 use serde::Serialize;
 use std::{
     sync::mpsc::{self, Receiver, Sender},
@@ -378,7 +381,7 @@ mod win {
 
     pub struct Session {
         // Both COM pointers live and drop on this worker apartment.
-        _application: IDispatch,
+        pub(super) _application: IDispatch,
         pub(super) namespace: IDispatch,
         pub(super) refs: MailRefs,
     }

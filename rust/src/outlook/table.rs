@@ -74,6 +74,11 @@ pub fn enumerate(folder: &IDispatch, store_id: &str, options: RowOptions<'_>) ->
     // instantiating each Outlook MailItem.
     let table = win::method_object(folder, "GetTable", vec![VARIANT::from(options.filter)])
         .context("Outlook Folder.GetTable unavailable for this folder/filter")?;
+    enumerate_existing(&table, store_id, options)
+}
+
+/// Enumerate an already-completed Search.GetTable, not a new search.
+pub fn enumerate_existing(table: &IDispatch, store_id: &str, options: RowOptions<'_>) -> Result<RowPage> {
     let columns = win::object_property(&table, "Columns")?;
     win::invoke(&columns, "RemoveAll", DISPATCH_METHOD, vec![])?;
 

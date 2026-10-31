@@ -2,7 +2,7 @@
 //!
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
-use super::{MailCommand, table, win};
+use super::{MailCommand, indexed, table, win};
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
 };
@@ -297,6 +297,9 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
     let safe_query = escape_dasl(params.query.trim());
     let scope = params.scope.as_deref().unwrap_or("subject_body");
     let backend = params.backend.as_deref().unwrap_or("auto");
+    if backend == "indexed" {
+        bail!("indexed search must be dispatched through the session application event sink");
+    }
     if scope == "subject_body" && backend == "table" {
         bail!(
             "Folder.GetTable cannot reliably filter body text; use auto or legacy until indexed AdvancedSearch is implemented"
@@ -400,6 +403,11 @@ impl win::Session {
             }
             MailCommand::ListFolders(params) => list_folders(&self.namespace, params),
             MailCommand::ListMails(params) => list_mails(&self.namespace, params),
+            MailCommand::SearchMails(params) if params.backend.as_deref() == Some("indexed") => {
+                let folder = folder_path(&self.namespace, params.folder.as_deref())?;
+                let store_id = optional_text(&folder, "StoreID");
+                indexed::search(&self._application, &folder, &params, &store_id)
+            }
             MailCommand::SearchMails(params) => search_mails(&self.namespace, params),
             MailCommand::GetMail(mut params) => {
                 self.refs.resolve_input(&mut params)?;

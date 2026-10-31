@@ -108,7 +108,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Search one Outlook Classic folder and return compact metadata-only hits with session-scoped m1-style handles instead of long EntryIDs/StoreIDs. Backends auto/table/legacy; elapsed_ms is measured."
+        description = "Search one Outlook Classic folder and return compact metadata-only hits with session-scoped m1-style handles instead of long EntryIDs/StoreIDs. Backends auto/table/legacy/indexed (indexed is experimental, requires Instant Search and waits for completion event); elapsed_ms is measured."
     )]
     async fn outlook_search_mails(
         &self,

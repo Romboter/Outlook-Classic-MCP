@@ -41,8 +41,10 @@ pub struct SearchMailsParams {
     pub limit: Option<u32>,
     /// Search fields: subject, from, or subject_body (default).
     pub scope: Option<String>,
-    /// Backend: auto (default), table, or legacy. Table supports subject/from only.
+    /// Backend: auto (default), table, legacy, indexed. Indexed uses experimental event-driven AdvancedSearch.
     pub backend: Option<String>,
+    /// Include subfolders when backend=indexed (default false). Other backends reject this option.
+    pub search_subfolders: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -76,8 +78,8 @@ pub fn checked_limit(input: Option<u32>) -> Result<usize, String> {
     Ok(n as usize)
 }
 
-fn validate_backend(name: Option<&str>) -> Result<(), String> {
-    if matches!(name.unwrap_or("auto"), "auto" | "table" | "legacy") {
+fn validate_backend(name: Option<&str>, allow_indexed: bool) -> Result<(), String> {
+    if matches!(name.unwrap_or("auto"), "auto" | "table" | "legacy") || (allow_indexed && name == Some("indexed")) {
         Ok(())
     } else {
         Err("backend must be auto, table or legacy".into())
@@ -96,7 +98,7 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         }
         MailCommand::ListMails(x) => {
             checked_limit(x.limit)?;
-            validate_backend(x.backend.as_deref())?;
+            validate_backend(x.backend.as_deref(), false)?;
             if x.offset.unwrap_or(0) > 1000 {
                 return Err("offset must be 0..1000".into());
             }

@@ -23,7 +23,7 @@ mod thread;
 use serde::Serialize;
 use std::{
     sync::mpsc::{self, Receiver, Sender},
-    thread,
+    thread as std_thread,
     time::Duration,
 };
 
@@ -55,13 +55,13 @@ pub struct OutlookBridge {
     sender: Sender<Request>,
     // An intentionally detached thread on Drop avoids indefinitely blocking
     // shutdown if Outlook is displaying a modal COM/security dialog.
-    _thread: thread::JoinHandle<()>,
+    _thread: std_thread::JoinHandle<()>,
 }
 
 impl OutlookBridge {
     pub fn start() -> Self {
         let (sender, receiver) = mpsc::channel();
-        let handle = thread::Builder::new()
+        let handle = std_thread::Builder::new()
             .name("outlook-com-sta".into())
             .spawn(move || run_worker(receiver))
             .expect("unable to start Outlook COM worker");

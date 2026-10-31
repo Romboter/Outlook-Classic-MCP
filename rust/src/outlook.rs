@@ -6,6 +6,9 @@ use crate::contracts::{MailCommand, validate_command};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 #[cfg(windows)]
+#[path = "outlook/indexed.rs"]
+mod indexed;
+#[cfg(windows)]
 #[path = "outlook/mailbox.rs"]
 mod mailbox;
 #[cfg(windows)]
@@ -14,9 +17,6 @@ mod refs;
 #[cfg(windows)]
 #[path = "outlook/table.rs"]
 mod table;
-#[cfg(windows)]
-#[path = "outlook/indexed.rs"]
-mod indexed;
 use serde::Serialize;
 use std::{
     sync::mpsc::{self, Receiver, Sender},

@@ -17,11 +17,13 @@ use std::{
     time::{Duration, Instant},
 };
 use windows::{
-    core::{GUID, IUnknown, Interface},
     Win32::System::{
-        Com::{DISPPARAMS, IConnectionPoint, IConnectionPointContainer, IDispatch, DISPATCH_METHOD},
+        Com::{
+            DISPATCH_METHOD, DISPPARAMS, IConnectionPoint, IConnectionPointContainer, IDispatch,
+        },
         Variant::VARIANT,
     },
+    core::{GUID, IUnknown, Interface},
 };
 
 // Outlook ApplicationEvents_11 (dispatch) interface and the documented
@@ -48,11 +50,24 @@ struct SinkVtbl {
     release: unsafe extern "system" fn(*mut Sink) -> u32,
     get_type_info_count: unsafe extern "system" fn(*mut Sink, *mut u32) -> i32,
     get_type_info: unsafe extern "system" fn(*mut Sink, u32, u32, *mut *mut c_void) -> i32,
-    get_ids_of_names:
-        unsafe extern "system" fn(*mut Sink, *const GUID, *const *const u16, u32, u32, *mut i32) -> i32,
+    get_ids_of_names: unsafe extern "system" fn(
+        *mut Sink,
+        *const GUID,
+        *const *const u16,
+        u32,
+        u32,
+        *mut i32,
+    ) -> i32,
     invoke: unsafe extern "system" fn(
-        *mut Sink, i32, *const GUID, u32, u16, *mut DISPPARAMS, *mut VARIANT,
-        *mut c_void, *mut u32,
+        *mut Sink,
+        i32,
+        *const GUID,
+        u32,
+        u16,
+        *mut DISPPARAMS,
+        *mut VARIANT,
+        *mut c_void,
+        *mut u32,
     ) -> i32,
 }
 
@@ -65,9 +80,13 @@ struct Sink {
 }
 
 unsafe extern "system" fn query_interface(
-    this: *mut Sink, iid: *const GUID, out: *mut *mut c_void,
+    this: *mut Sink,
+    iid: *const GUID,
+    out: *mut *mut c_void,
 ) -> i32 {
-    if iid.is_null() || out.is_null() { return E_POINTER; }
+    if iid.is_null() || out.is_null() {
+        return E_POINTER;
+    }
     // SAFETY: Called by COM with a valid live Sink. Return one additional
     // COM ref for every successfully queried supported interface.
     unsafe {
@@ -88,35 +107,62 @@ unsafe extern "system" fn release(this: *mut Sink) -> u32 {
     let remaining = unsafe { (*this).references.fetch_sub(1, Ordering::Release) - 1 };
     if remaining == 0 {
         std::sync::atomic::fence(Ordering::Acquire);
-        unsafe { drop(Box::from_raw(this)); }
+        unsafe {
+            drop(Box::from_raw(this));
+        }
     }
     remaining
 }
 unsafe extern "system" fn get_type_info_count(_this: *mut Sink, count: *mut u32) -> i32 {
-    if count.is_null() { return E_POINTER; }
-    unsafe { *count = 0; }
+    if count.is_null() {
+        return E_POINTER;
+    }
+    unsafe {
+        *count = 0;
+    }
     S_OK
 }
 unsafe extern "system" fn get_type_info(
-    _this: *mut Sink, _index: u32, _lcid: u32, _info: *mut *mut c_void,
-) -> i32 { E_NOTIMPL }
+    _this: *mut Sink,
+    _index: u32,
+    _lcid: u32,
+    _info: *mut *mut c_void,
+) -> i32 {
+    E_NOTIMPL
+}
 unsafe extern "system" fn get_ids_of_names(
-    _this: *mut Sink, _iid: *const GUID, _names: *const *const u16,
-    _count: u32, _lcid: u32, _dispids: *mut i32,
-) -> i32 { E_NOTIMPL }
+    _this: *mut Sink,
+    _iid: *const GUID,
+    _names: *const *const u16,
+    _count: u32,
+    _lcid: u32,
+    _dispids: *mut i32,
+) -> i32 {
+    E_NOTIMPL
+}
 
 unsafe extern "system" fn invoke_event(
-    this: *mut Sink, dispid: i32, _iid: *const GUID, _lcid: u32, _flags: u16,
-    args: *mut DISPPARAMS, _result: *mut VARIANT, _exception: *mut c_void,
+    this: *mut Sink,
+    dispid: i32,
+    _iid: *const GUID,
+    _lcid: u32,
+    _flags: u16,
+    args: *mut DISPPARAMS,
+    _result: *mut VARIANT,
+    _exception: *mut c_void,
     _argerr: *mut u32,
 ) -> i32 {
-    if dispid != ADVANCED_SEARCH_COMPLETE || args.is_null() { return S_OK; }
+    if dispid != ADVANCED_SEARCH_COMPLETE || args.is_null() {
+        return S_OK;
+    }
     // COM calls us on our registered STA. The event argument is the Search
     // dispatch interface; examine its Tag to avoid accepting someone else's
     // concurrent AdvancedSearchComplete notification.
     unsafe {
         let params = &*args;
-        if params.cArgs < 1 || params.rgvarg.is_null() { return S_OK; }
+        if params.cArgs < 1 || params.rgvarg.is_null() {
+            return S_OK;
+        }
         let search_value = &*params.rgvarg;
         if let Ok(search) = IDispatch::try_from(search_value)
             && let Ok(tag) = win::string_property(&search, "Tag")
@@ -129,8 +175,13 @@ unsafe extern "system" fn invoke_event(
 }
 
 static SINK_VTBL: SinkVtbl = SinkVtbl {
-    query_interface, add_ref, release, get_type_info_count, get_type_info,
-    get_ids_of_names, invoke: invoke_event,
+    query_interface,
+    add_ref,
+    release,
+    get_type_info_count,
+    get_type_info,
+    get_ids_of_names,
+    invoke: invoke_event,
 };
 
 struct Subscription {
@@ -141,14 +192,17 @@ struct Subscription {
 }
 impl Subscription {
     fn attach(application: &IDispatch, tag: &str) -> Result<Self> {
-        let source: IConnectionPointContainer = application.cast()
+        let source: IConnectionPointContainer = application
+            .cast()
             .context("Outlook Application doesn't expose connection points")?;
         let point = unsafe { source.FindConnectionPoint(&EVENT_IID) }
             .context("Outlook ApplicationEvents_11 connection point unavailable")?;
         let completed = Rc::new(Cell::new(false));
         let raw = Box::into_raw(Box::new(Sink {
-            vtable: &SINK_VTBL, references: AtomicU32::new(1),
-            expected_tag: tag.to_owned(), completed: completed.clone(),
+            vtable: &SINK_VTBL,
+            references: AtomicU32::new(1),
+            expected_tag: tag.to_owned(),
+            completed: completed.clone(),
         }));
         // SAFETY: Box begins with the exact IDispatch vtable pointer and is
         // created with a single COM reference owned by IUnknown. Advise takes
@@ -156,7 +210,12 @@ impl Subscription {
         let sink = unsafe { IUnknown::from_raw(raw.cast()) };
         let cookie = unsafe { point.Advise(&sink) }
             .context("Unable to subscribe to Outlook AdvancedSearchComplete")?;
-        Ok(Self { point, cookie, _sink: sink, completed })
+        Ok(Self {
+            point,
+            cookie,
+            _sink: sink,
+            completed,
+        })
     }
 }
 impl Drop for Subscription {
@@ -182,12 +241,17 @@ pub fn filter(query: &str, scope: &str) -> String {
 }
 
 pub fn search(
-    application: &IDispatch, folder: &IDispatch, params: &SearchMailsParams, store_id: &str,
+    application: &IDispatch,
+    folder: &IDispatch,
+    params: &SearchMailsParams,
+    store_id: &str,
 ) -> Result<Value> {
     let started = Instant::now();
     let index = table::store_instant_search(folder);
     if index != Some(true) {
-        bail!("Indexed AdvancedSearch requires an Outlook store with Instant Search enabled; requested store did not confirm indexing");
+        bail!(
+            "Indexed AdvancedSearch requires an Outlook store with Instant Search enabled; requested store did not confirm indexing"
+        );
     }
     let limit = checked_limit(params.limit).map_err(anyhow::Error::msg)?;
     let scope_name = win::string_property(folder, "FolderPath")
@@ -196,31 +260,42 @@ pub fn search(
     // must be doubled to remain part of the folder name.
     let scope = format!("'{}'", scope_name.replace('\'', "''"));
     let search_filter = filter(
-        params.query.trim(), params.scope.as_deref().unwrap_or("subject_body")
+        params.query.trim(),
+        params.scope.as_deref().unwrap_or("subject_body"),
     );
     let tag = format!(
         "outlook-mcp-rs-{}-{}",
-        std::process::id(), NEXT_TAG.fetch_add(1, Ordering::Relaxed)
+        std::process::id(),
+        NEXT_TAG.fetch_add(1, Ordering::Relaxed)
     );
     // The event sink must be advised BEFORE triggering AdvancedSearch. A
     // completion event may arrive immediately on cached/short queries.
     let subscription = Subscription::attach(application, &tag)?;
-    let operation = win::method_object(application, "AdvancedSearch", vec![
-        VARIANT::from(scope.as_str()),
-        VARIANT::from(search_filter.as_str()),
-        VARIANT::from(params.search_subfolders.unwrap_or(false)),
-        VARIANT::from(tag.as_str()),
-    ]).context("Application.AdvancedSearch failed")?;
+    let operation = win::method_object(
+        application,
+        "AdvancedSearch",
+        vec![
+            VARIANT::from(scope.as_str()),
+            VARIANT::from(search_filter.as_str()),
+            VARIANT::from(params.search_subfolders.unwrap_or(false)),
+            VARIANT::from(tag.as_str()),
+        ],
+    )
+    .context("Application.AdvancedSearch failed")?;
 
     let synchronous = win::property(&operation, "IsSynchronous")
-        .ok().and_then(|v| bool::try_from(&v).ok()).unwrap_or(false);
+        .ok()
+        .and_then(|v| bool::try_from(&v).ok())
+        .unwrap_or(false);
     if !synchronous {
         while !subscription.completed.get() {
             if started.elapsed() >= SEARCH_TIMEOUT {
                 // Best-effort cancellation of *only this* search; do not
                 // clear or interfere with another Outlook UI search.
                 let _ = win::invoke(&operation, "Stop", DISPATCH_METHOD, vec![]);
-                bail!("Outlook indexed search did not signal AdvancedSearchComplete within 18 seconds");
+                bail!(
+                    "Outlook indexed search did not signal AdvancedSearchComplete within 18 seconds"
+                );
             }
             win::pump_messages();
             thread::sleep(Duration::from_millis(10));
@@ -232,8 +307,15 @@ pub fn search(
     let search_table = win::method_object(&operation, "GetTable", vec![])
         .context("Search.GetTable failed after completion")?;
     let page = table::enumerate_existing(
-        &search_table, store_id,
-        table::RowOptions {filter: "", limit, offset: 0, unread_only: false, sender_substring: None}
+        &search_table,
+        store_id,
+        table::RowOptions {
+            filter: "",
+            limit,
+            offset: 0,
+            unread_only: false,
+            sender_substring: None,
+        },
     )?;
     drop(subscription);
     Ok(json!({
@@ -268,6 +350,9 @@ mod tests {
     #[test]
     fn event_contract_constants_match_outlook_pia() {
         assert_eq!(ADVANCED_SEARCH_COMPLETE, 64106);
-        assert_eq!(EVENT_IID, GUID::from_u128(0x0006302c_0000_0000_c000_000000000046));
+        assert_eq!(
+            EVENT_IID,
+            GUID::from_u128(0x0006302c_0000_0000_c000_000000000046)
+        );
     }
 }

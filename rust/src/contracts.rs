@@ -79,7 +79,9 @@ pub fn checked_limit(input: Option<u32>) -> Result<usize, String> {
 }
 
 fn validate_backend(name: Option<&str>, allow_indexed: bool) -> Result<(), String> {
-    if matches!(name.unwrap_or("auto"), "auto" | "table" | "legacy") || (allow_indexed && name == Some("indexed")) {
+    if matches!(name.unwrap_or("auto"), "auto" | "table" | "legacy")
+        || (allow_indexed && name == Some("indexed"))
+    {
         Ok(())
     } else {
         Err("backend must be auto, table, legacy or indexed (search only)".into())

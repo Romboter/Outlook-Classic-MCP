@@ -32,16 +32,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-      - name: Format experimental indexed-search source (temporary)
-        run: cargo fmt --manifest-path rust/Cargo.toml --all
-      - name: Capture formatted indexed source (temporary)
-        shell: pwsh
-        run: |
-          foreach ($file in @('rust/src/outlook/indexed.rs', 'rust/src/outlook.rs', 'rust/src/outlook/table.rs', 'rust/src/outlook/mailbox.rs', 'rust/src/contracts.rs', 'rust/src/lib.rs')) {
-            Write-Output "BEGIN_INDEX_STAGE $file"
-            Write-Output ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $file))))
-            Write-Output "END_INDEX_STAGE $file"
-          }
       - name: Check formatting
         run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
       - name: Lint

@@ -78,8 +78,12 @@ pub fn enumerate(folder: &IDispatch, store_id: &str, options: RowOptions<'_>) ->
 }
 
 /// Enumerate an already-completed Search.GetTable, not a new search.
-pub fn enumerate_existing(table: &IDispatch, store_id: &str, options: RowOptions<'_>) -> Result<RowPage> {
-    let columns = win::object_property(&table, "Columns")?;
+pub fn enumerate_existing(
+    table: &IDispatch,
+    store_id: &str,
+    options: RowOptions<'_>,
+) -> Result<RowPage> {
+    let columns = win::object_property(table, "Columns")?;
     win::invoke(&columns, "RemoveAll", DISPATCH_METHOD, vec![])?;
 
     for column in ["EntryID", "Subject", "ReceivedTime", "MessageClass"] {
@@ -130,7 +134,7 @@ pub fn enumerate_existing(table: &IDispatch, store_id: &str, options: RowOptions
     }
 
     win::invoke(
-        &table,
+        table,
         "Sort",
         DISPATCH_METHOD,
         vec![VARIANT::from("ReceivedTime"), VARIANT::from(true)],
@@ -150,13 +154,13 @@ pub fn enumerate_existing(table: &IDispatch, store_id: &str, options: RowOptions
                 scan_truncated: true,
             });
         }
-        let end = bool::try_from(&win::property(&table, "EndOfTable")?)
+        let end = bool::try_from(&win::property(table, "EndOfTable")?)
             .context("Outlook Table.EndOfTable returned an invalid value")?;
         if end {
             break;
         }
         scanned += 1;
-        let row = win::method_object(&table, "GetNextRow", vec![])?;
+        let row = win::method_object(table, "GetNextRow", vec![])?;
         let class = text(&row, "MessageClass");
         if !class.starts_with("IPM.Note") && !class.starts_with("IPM.Post") {
             continue;

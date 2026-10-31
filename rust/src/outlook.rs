@@ -3,6 +3,11 @@
 //! This is intentionally separate from the MCP tools until issue #4. No mail
 //! mutation operations or live mailbox tools are exposed by this module.
 use anyhow::{Context, Result, bail};
+use crate::contracts::{MailCommand, validate_command};
+use serde_json::Value;
+#[cfg(windows)]
+#[path = "outlook/mailbox.rs"]
+mod mailbox;
 use serde::Serialize;
 use std::{
     sync::mpsc::{self, Receiver, Sender},
@@ -24,6 +29,10 @@ enum Request {
     Probe {
         include_first_subject: bool,
         response: Sender<Result<OutlookProbe, String>>,
+    },
+    Call {
+        command: MailCommand,
+        response: Sender<Result<Value, String>>,
     },
     Shutdown,
 }
@@ -74,6 +83,23 @@ impl OutlookBridge {
     }
 }
 
+impl OutlookBridge {
+    pub fn execute(&self, command: MailCommand) -> Result<Value> {
+        validate_command(&command).map_err(anyhow::Error::msg)?;
+        let (tx, rx) = mpsc::channel();
+        self.sender.send(Request::Call { command, response: tx })
+            .context("Outlook COM worker has exited")?;
+        match rx.recv_timeout(Duration::from_secs(45)) {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) => bail!("{error}"),
+            Err(mpsc::RecvTimeoutError::Timeout) => bail!(
+                "Read-only Outlook request timed out; Outlook may be showing a dialog. Request may finish later."
+            ),
+            Err(mpsc::RecvTimeoutError::Disconnected) => bail!("Outlook COM worker disconnected"),
+        }
+    }
+}
+
 impl Drop for OutlookBridge {
     fn drop(&mut self) {
         let _ = self.sender.send(Request::Shutdown);
@@ -100,6 +126,37 @@ fn run_worker(receiver: Receiver<Request>) {
 
         match command {
             Request::Shutdown => break,
+            Request::Call { command, response } => {
+                let result = match &initialization {
+                    Ok(_) => {
+                        if session.is_none() {
+                            session = win::Session::attach().ok();
+                        }
+                        match &mut session {
+                            Some(existing) => match existing.execute(command.clone()) {
+                                Ok(value) => Ok(value),
+                                Err(error) if win::is_disconnect(&error) => {
+                                    session = None;
+                                    match win::Session::attach() {
+                                        Ok(mut refreshed) => {
+                                            let result = refreshed.execute(command);
+                                            session = Some(refreshed);
+                                            result
+                                        }
+                                        Err(error) => Err(error),
+                                    }
+                                }
+                                Err(error) => Err(error),
+                            },
+                            None => Err(anyhow::anyhow!(
+                                "Outlook Classic is not running or its COM session is unavailable"
+                            )),
+                        }
+                    }
+                    Err(error) => Err(anyhow::anyhow!("{error}")),
+                };
+                let _ = response.send(result.map_err(|error| format!("{error:#}")));
+            }
             Request::Probe {
                 include_first_subject,
                 response,
@@ -147,6 +204,9 @@ fn run_worker(receiver: Receiver<Request>) {
     while let Ok(request) = receiver.recv() {
         match request {
             Request::Shutdown => break,
+            Request::Call { response, .. } => {
+                let _ = response.send(Err("Outlook Classic COM requires Windows".into()));
+            }
             Request::Probe { response, .. } => {
                 let _ = response.send(Err("Outlook Classic COM requires Windows".into()));
             }
@@ -231,7 +291,7 @@ mod win {
             })
     }
 
-    fn invoke(
+    pub(super) fn invoke(
         object: &IDispatch,
         member: &str,
         flags: DISPATCH_FLAGS,
@@ -275,28 +335,28 @@ mod win {
         }
     }
 
-    fn property(object: &IDispatch, member: &str) -> Result<VARIANT> {
+    pub(super) fn property(object: &IDispatch, member: &str) -> Result<VARIANT> {
         invoke(object, member, DISPATCH_PROPERTYGET, vec![])
     }
 
-    fn object_property(object: &IDispatch, name: &str) -> Result<IDispatch> {
+    pub(super) fn object_property(object: &IDispatch, name: &str) -> Result<IDispatch> {
         IDispatch::try_from(&property(object, name)?)
             .with_context(|| format!("Outlook {name} object conversion"))
     }
 
-    fn method_object(object: &IDispatch, name: &str, args: Vec<VARIANT>) -> Result<IDispatch> {
+    pub(super) fn method_object(object: &IDispatch, name: &str, args: Vec<VARIANT>) -> Result<IDispatch> {
         IDispatch::try_from(&invoke(object, name, DISPATCH_METHOD, args)?)
             .with_context(|| format!("Outlook {name} returned non-object"))
     }
 
-    fn string_property(object: &IDispatch, name: &str) -> Result<String> {
+    pub(super) fn string_property(object: &IDispatch, name: &str) -> Result<String> {
         let value = property(object, name)?;
         let str_value = BSTR::try_from(&value)
             .with_context(|| format!("Outlook {name} returned non-string"))?;
         Ok(str_value.to_string())
     }
 
-    fn int_property(object: &IDispatch, name: &str) -> Result<i32> {
+    pub(super) fn int_property(object: &IDispatch, name: &str) -> Result<i32> {
         let value = property(object, name)?;
         i32::try_from(&value).with_context(|| format!("Outlook {name} returned non-integer"))
     }
@@ -304,7 +364,7 @@ mod win {
     pub struct Session {
         // Both COM pointers live and drop on this worker apartment.
         _application: IDispatch,
-        namespace: IDispatch,
+        pub(super) namespace: IDispatch,
     }
 
     impl Session {

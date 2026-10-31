@@ -393,7 +393,7 @@ fn get_mail(namespace: &IDispatch, params: GetMailParams) -> Result<Value> {
 
 impl win::Session {
     pub fn execute(&mut self, command: MailCommand) -> Result<Value> {
-        match command {
+        let mut response = match command {
             MailCommand::WhoAmI => {
                 let recipient = win::object_property(&self.namespace, "CurrentUser")?;
                 Ok(json!({"current_user": win::string_property(&recipient, "Name")?}))
@@ -401,7 +401,12 @@ impl win::Session {
             MailCommand::ListFolders(params) => list_folders(&self.namespace, params),
             MailCommand::ListMails(params) => list_mails(&self.namespace, params),
             MailCommand::SearchMails(params) => search_mails(&self.namespace, params),
-            MailCommand::GetMail(params) => get_mail(&self.namespace, params),
-        }
+            MailCommand::GetMail(mut params) => {
+                self.refs.resolve_input(&mut params)?;
+                get_mail(&self.namespace, params)
+            }
+        }?;
+        self.refs.compact_response(&mut response);
+        Ok(response)
     }
 }

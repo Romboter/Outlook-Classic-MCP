@@ -1,12 +1,21 @@
 # Outlook Classic MCP — Rust implementation
 
-> **Status: foundation only.** This is a standalone Rust MCP **scaffold**, not an Outlook reader yet. The original Python implementation remains fully functional and unchanged.
+> **Status: experimental COM probe.** The Rust MCP server still has **no mail-reading tools**. A separate, explicit Windows CLI command now attempts to attach to the already-running Outlook Classic process. The original Python implementation remains unchanged.
 
 This directory will contain a Windows-native rewrite optimized for **fast, low-token searches** against an already-running Outlook Classic profile. The goal is local stdio MCP, indexed Outlook search, concise search-result metadata, and full-message reads only when specifically requested.
 
 ## Current behavior
 
-The Rust executable exposes only `outlook_rust_status`. It reports that the COM bridge and mailbox tools are **not implemented**; it does **not** read messages or authenticate to Outlook.
+The Rust MCP executable exposes only `outlook_rust_status`; it **does not** read or return messages to an LLM. On a Windows workstation with Outlook Classic running, you can deliberately invoke the CLI probes:
+
+```powershell
+cargo run -- --probe-outlook
+cargo run -- --probe-first-mail
+```
+
+The first probe reads the bound profile's display name and Inbox counts. The second additionally reads only the first Inbox item's subject for local diagnostics. Both return a compact JSON object **to your terminal**, not to the MCP client. Avoid sharing that output publicly. The probe attaches through the COM Running Object Table and does not auto-launch Outlook. No sends, writes, moves, deletes, or direct OST parsing occur.
+
+**Important:** Windows CI cannot verify actual Outlook behavior because the hosted runner has no interactive Outlook profile. Live Windows/Outlook integration testing remains required for issue #3; do not claim this is production ready.
 
 ## Build
 
@@ -31,7 +40,7 @@ To inspect the protocol, use an MCP client or the MCP Inspector. **Do not regist
 
 ### Dependency and lockfile policy
 
-The MCP SDK is pinned at `rmcp =3.5.1`. The checked-in `Cargo.lock` pins transitive dependencies; CI uses `--locked` for builds, linting, and tests. Update the lockfile intentionally via `cargo update` or `cargo generate-lockfile` on a review branch, and include it in the same PR as dependency changes. Live Outlook COM behavior is not tested by this scaffold.
+The MCP SDK is pinned at `rmcp =3.5.1`. The checked-in `Cargo.lock` pins transitive dependencies; CI uses `--locked` for builds, linting, and tests. Update the lockfile intentionally via `cargo update` or `cargo generate-lockfile` on a review branch, and include it in the same PR as dependency changes. Live Outlook COM behavior is not tested by hosted CI.
 
 ## Design constraints
 
@@ -58,7 +67,8 @@ rust/
   Cargo.toml
   src/
     main.rs     # stdio entry point
-    lib.rs      # MCP tool router (foundation only)
+    lib.rs      # MCP tool router (diagnostic only)
+    outlook.rs  # STA COM worker, explicit CLI probe
   compatibility/
     tools.md    # existing Python tool inventory
 ```

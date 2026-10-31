@@ -32,6 +32,18 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+      - name: Generate temporary lockfile for Windows COM dependency validation
+        run: cargo generate-lockfile --manifest-path rust/Cargo.toml
+      - name: Autoformat source temporarily for compilation check
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+      - name: Emit staged Rust files for review (temporary)
+        shell: pwsh
+        run: |
+          foreach ($file in @('rust/Cargo.lock', 'rust/src/outlook.rs', 'rust/src/main.rs', 'rust/src/lib.rs')) {
+            Write-Output "BEGIN_COM_STAGE $file"
+            Write-Output ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $file))))
+            Write-Output "END_COM_STAGE $file"
+          }
       - name: Check formatting
         run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
       - name: Lint

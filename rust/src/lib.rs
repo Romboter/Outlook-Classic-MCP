@@ -1,7 +1,9 @@
 //! Foundation of the Rust Outlook Classic MCP server.
 //!
-//! This stage intentionally exposes **no mailbox tools**. It does not attempt
-//! to start Outlook, read email, or access a COM session. See issues #3 and #4.
+//! This stage intentionally exposes **no mailbox tools**. A separate, explicit
+//! CLI probe exercises Outlook COM without providing model-facing mail access.
+
+pub mod outlook;
 
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde::Serialize;
@@ -20,7 +22,7 @@ pub fn foundation_status() -> FoundationStatus {
     FoundationStatus {
         implementation: "rust",
         version: env!("CARGO_PKG_VERSION"),
-        stage: "foundation-only",
+        stage: "com-probe-only",
         outlook_connected: false,
         mailbox_tools_available: false,
     }
@@ -57,7 +59,7 @@ mod tests {
         let status = foundation_status();
         assert!(!status.outlook_connected);
         assert!(!status.mailbox_tools_available);
-        assert_eq!(status.stage, "foundation-only");
+        assert_eq!(status.stage, "com-probe-only");
     }
 
     #[test]

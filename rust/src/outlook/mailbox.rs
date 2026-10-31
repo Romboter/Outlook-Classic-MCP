@@ -1,15 +1,17 @@
 //! Late-bound, read-only Outlook operations on the existing STA session.
 //!
 //! No COM interface leaves this thread. List/search materialize bounded,
- //! metadata-only JSON results; bodies are read only by GetMail.
-use super::{win, MailCommand};
-use crate::contracts::{checked_limit, escape_dasl, FolderParams, GetMailParams, ListMailsParams, SearchMailsParams};
+//! metadata-only JSON results; bodies are read only by GetMail.
+use super::{MailCommand, win};
+use crate::contracts::{
+    FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
+};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use windows::{
     Win32::System::{
         Com::{DISPATCH_METHOD, IDispatch},
-        Variant::{VARIANT, VAR_CHANGE_FLAGS, VT_BSTR, VariantChangeType},
+        Variant::{VAR_CHANGE_FLAGS, VARIANT, VT_BSTR, VariantChangeType},
     },
     core::BSTR,
 };
@@ -22,18 +24,26 @@ fn text_property(object: &IDispatch, name: &str) -> String {
     // Outlook DATE properties come back as VT_DATE rather than VT_BSTR.
     // Coercion uses the current Windows locale. We label dates as local text,
     // not ISO-8601, until typed conversion has been tested on real Outlook.
-    let Ok(value) = win::property(object, name) else { return String::new() };
-    if let Ok(text) = BSTR::try_from(&value) { return text.to_string(); }
-    let mut converted = VARIANT::default();
-    let result = unsafe {
-        VariantChangeType(&mut converted, &value, VAR_CHANGE_FLAGS(0), VT_BSTR)
+    let Ok(value) = win::property(object, name) else {
+        return String::new();
     };
-    if result.is_err() { return String::new(); }
-    BSTR::try_from(&converted).map(|s| s.to_string()).unwrap_or_default()
+    if let Ok(text) = BSTR::try_from(&value) {
+        return text.to_string();
+    }
+    let mut converted = VARIANT::default();
+    let result = unsafe { VariantChangeType(&mut converted, &value, VAR_CHANGE_FLAGS(0), VT_BSTR) };
+    if result.is_err() {
+        return String::new();
+    }
+    BSTR::try_from(&converted)
+        .map(|s| s.to_string())
+        .unwrap_or_default()
 }
 
 fn bool_property(object: &IDispatch, name: &str) -> bool {
-    let Ok(value) = win::property(object, name) else { return false };
+    let Ok(value) = win::property(object, name) else {
+        return false;
+    };
     bool::try_from(&value).unwrap_or(false)
 }
 
@@ -45,26 +55,46 @@ fn folder_path(namespace: &IDispatch, path: Option<&str>) -> Result<IDispatch> {
     let path = path.unwrap_or("inbox").trim();
     let key = path.to_lowercase();
     let kind = match key.as_str() {
-        "" | "inbox" => Some(6), "sent" | "sent items" => Some(5),
-        "drafts" => Some(16), "deleted" | "deleted items" => Some(3),
-        "outbox" => Some(4), _ => None,
+        "" | "inbox" => Some(6),
+        "sent" | "sent items" => Some(5),
+        "drafts" => Some(16),
+        "deleted" | "deleted items" => Some(3),
+        "outbox" => Some(4),
+        _ => None,
     };
-    if let Some(kind) = kind { return default_folder(namespace, kind); }
+    if let Some(kind) = kind {
+        return default_folder(namespace, kind);
+    }
 
     // Relative folders in the default mailbox: Inbox/Projects/...
     // or a mailbox-root path like Projects/Customers.
-    let segments: Vec<&str> = path.split(['/', '\\']).filter(|s| !s.trim().is_empty()).collect();
-    if segments.len() > 8 { bail!("folder path is too deep"); }
-    let mut current = if segments.first().is_some_and(|s| s.eq_ignore_ascii_case("inbox")) {
+    let segments: Vec<&str> = path
+        .split(['/', '\\'])
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    if segments.len() > 8 {
+        bail!("folder path is too deep");
+    }
+    let mut current = if segments
+        .first()
+        .is_some_and(|s| s.eq_ignore_ascii_case("inbox"))
+    {
         default_folder(namespace, 6)?
     } else {
         win::object_property(&default_folder(namespace, 6)?, "Parent")?
     };
-    let rest = if segments.first().is_some_and(|s| s.eq_ignore_ascii_case("inbox")) {
+    let rest = if segments
+        .first()
+        .is_some_and(|s| s.eq_ignore_ascii_case("inbox"))
+    {
         &segments[1..]
-    } else { &segments[..] };
+    } else {
+        &segments[..]
+    };
     for part in rest {
-        if part.len() > 120 || *part == ".." || *part == "." { bail!("invalid folder segment"); }
+        if part.len() > 120 || *part == ".." || *part == "." {
+            bail!("invalid folder segment");
+        }
         let folders = win::object_property(&current, "Folders")?;
         current = win::method_object(&folders, "Item", vec![VARIANT::from(*part)])
             .with_context(|| format!("folder segment not found: {part}"))?;
@@ -84,8 +114,14 @@ fn item_summary(item: &IDispatch, store_id: &str) -> Value {
     })
 }
 
-fn collect_items(items: &IDispatch, store_id: &str, limit: usize, offset: usize,
-    unread_only: bool, sender_filter: Option<&str>) -> Result<(Vec<Value>, bool)> {
+fn collect_items(
+    items: &IDispatch,
+    store_id: &str,
+    limit: usize,
+    offset: usize,
+    unread_only: bool,
+    sender_filter: Option<&str>,
+) -> Result<(Vec<Value>, bool)> {
     let count = win::int_property(items, "Count")?.max(0) as usize;
     let mut hits = Vec::with_capacity(limit);
     let mut matched = 0usize;
@@ -99,48 +135,87 @@ fn collect_items(items: &IDispatch, store_id: &str, limit: usize, offset: usize,
             Err(_) => continue,
         };
         let class = win::int_property(&item, "Class").unwrap_or_default();
-        if class != 43 && class != 53 { continue; }
-        if unread_only && !bool_property(&item, "UnRead") { continue; }
-        if let Some(ref filter) = sender_filter {
-            let sender = format!("{} {}", optional_text(&item, "SenderName"),
-                optional_text(&item, "SenderEmailAddress")).to_lowercase();
-            if !sender.contains(filter) { continue; }
+        if class != 43 && class != 53 {
+            continue;
         }
-        if matched < offset { matched += 1; continue; }
-        if hits.len() >= limit { return Ok((hits, true)); }
+        if unread_only && !bool_property(&item, "UnRead") {
+            continue;
+        }
+        if let Some(ref filter) = sender_filter {
+            let sender = format!(
+                "{} {}",
+                optional_text(&item, "SenderName"),
+                optional_text(&item, "SenderEmailAddress")
+            )
+            .to_lowercase();
+            if !sender.contains(filter) {
+                continue;
+            }
+        }
+        if matched < offset {
+            matched += 1;
+            continue;
+        }
+        if hits.len() >= limit {
+            return Ok((hits, true));
+        }
         hits.push(item_summary(&item, store_id));
     }
     Ok((hits, false))
 }
 
 fn sort_received(items: &IDispatch) -> Result<()> {
-    win::invoke(items, "Sort", DISPATCH_METHOD,
-        vec![VARIANT::from("[ReceivedTime]"), VARIANT::from(true)])?;
+    win::invoke(
+        items,
+        "Sort",
+        DISPATCH_METHOD,
+        vec![VARIANT::from("[ReceivedTime]"), VARIANT::from(true)],
+    )?;
     Ok(())
 }
 
 fn list_folders(namespace: &IDispatch, params: FolderParams) -> Result<Value> {
     let start = if params.root.as_deref().unwrap_or("").trim().is_empty() {
         win::object_property(&default_folder(namespace, 6)?, "Parent")?
-    } else { folder_path(namespace, params.root.as_deref())? };
+    } else {
+        folder_path(namespace, params.root.as_deref())?
+    };
     let max_depth = params.max_depth.unwrap_or(2);
     let mut rows = Vec::new();
     let root_name = optional_text(&start, "Name");
-    fn walk(folder: &IDispatch, name: String, depth: u32, max_depth: u32,
-        rows: &mut Vec<Value>) -> Result<()> {
-        if rows.len() >= 100 { return Ok(()); }
+    fn walk(
+        folder: &IDispatch,
+        name: String,
+        depth: u32,
+        max_depth: u32,
+        rows: &mut Vec<Value>,
+    ) -> Result<()> {
+        if rows.len() >= 100 {
+            return Ok(());
+        }
         let count = win::object_property(folder, "Items")
-            .ok().and_then(|items| win::int_property(&items, "Count").ok());
+            .ok()
+            .and_then(|items| win::int_property(&items, "Count").ok());
         rows.push(json!({"name": optional_text(folder, "Name"),
             "path": name, "item_count": count}));
-        if depth >= max_depth { return Ok(()); }
+        if depth >= max_depth {
+            return Ok(());
+        }
         let folders = win::object_property(folder, "Folders")?;
         let count = win::int_property(&folders, "Count")?.max(0).min(100);
         for i in 1..=count {
-            if rows.len() >= 100 { break; }
+            if rows.len() >= 100 {
+                break;
+            }
             let child = win::method_object(&folders, "Item", vec![VARIANT::from(i)])?;
             let child_name = optional_text(&child, "Name");
-            walk(&child, format!("{}/{}", name, child_name), depth + 1, max_depth, rows)?;
+            walk(
+                &child,
+                format!("{}/{}", name, child_name),
+                depth + 1,
+                max_depth,
+                rows,
+            )?;
         }
         Ok(())
     }
@@ -157,10 +232,18 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
     let items = win::object_property(&folder, "Items")?;
     sort_received(&items)?;
     let offset = params.offset.unwrap_or(0) as usize;
-    let (rows, has_more) = collect_items(&items, &store_id, limit, offset,
-        params.unread_only.unwrap_or(false), params.from_address.as_deref())?;
-    Ok(json!({"folder":folder_name,"count":rows.len(),"limit":limit,
-        "offset":offset,"has_more":has_more,"items":rows}))
+    let (rows, has_more) = collect_items(
+        &items,
+        &store_id,
+        limit,
+        offset,
+        params.unread_only.unwrap_or(false),
+        params.from_address.as_deref(),
+    )?;
+    Ok(
+        json!({"folder":folder_name,"count":rows.len(),"limit":limit,
+        "offset":offset,"has_more":has_more,"items":rows}),
+    )
 }
 
 fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Value> {
@@ -175,26 +258,36 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
     let scope = params.scope.as_deref().unwrap_or("subject_body");
     let filter = match scope {
         "subject" => format!("@SQL=\"urn:schemas:httpmail:subject\" LIKE '%{safe_query}%'"),
-        "from" => format!("@SQL=(\"urn:schemas:httpmail:fromname\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:fromemail\" LIKE '%{safe_query}%')"),
-        _ => format!("@SQL=(\"urn:schemas:httpmail:subject\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:textdescription\" LIKE '%{safe_query}%')"),
+        "from" => format!(
+            "@SQL=(\"urn:schemas:httpmail:fromname\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:fromemail\" LIKE '%{safe_query}%')"
+        ),
+        _ => format!(
+            "@SQL=(\"urn:schemas:httpmail:subject\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:textdescription\" LIKE '%{safe_query}%')"
+        ),
     };
     let restricted = win::method_object(&items, "Restrict", vec![VARIANT::from(filter.as_str())])?;
     sort_received(&restricted)?;
     let (rows, has_more) = collect_items(&restricted, &store_id, limit, 0, false, None)?;
-    Ok(json!({"query":params.query,"scope":scope, "folder":folder_name,
-        "count":rows.len(), "has_more":has_more,"items":rows}))
+    Ok(
+        json!({"query":params.query,"scope":scope, "folder":folder_name,
+        "count":rows.len(), "has_more":has_more,"items":rows}),
+    )
 }
 
 fn get_mail(namespace: &IDispatch, params: GetMailParams) -> Result<Value> {
     let mut args = vec![VARIANT::from(params.entry_id.as_str())];
     if let Some(ref store) = params.store_id {
-        if store.is_empty() || store.len() > 4096 { bail!("invalid store_id"); }
+        if store.is_empty() || store.len() > 4096 {
+            bail!("invalid store_id");
+        }
         args.push(VARIANT::from(store.as_str()));
     }
     let item = win::method_object(namespace, "GetItemFromID", args)
         .context("Message no longer available; EntryID may be stale")?;
     let class = win::int_property(&item, "Class")?;
-    if class != 43 && class != 53 { bail!("EntryID does not identify a mail item"); }
+    if class != 43 && class != 53 {
+        bail!("EntryID does not identify a mail item");
+    }
     let limit = params.max_body_chars.unwrap_or(4000) as usize;
     let mut data = item_summary(&item, params.store_id.as_deref().unwrap_or(""));
     let object = data.as_object_mut().context("invalid mail result")?;
@@ -203,7 +296,10 @@ fn get_mail(namespace: &IDispatch, params: GetMailParams) -> Result<Value> {
     if params.include_body.unwrap_or(true) {
         let body = optional_text(&item, "Body");
         let total_chars = body.chars().count();
-        object.insert("body".into(), json!(body.chars().take(limit).collect::<String>()));
+        object.insert(
+            "body".into(),
+            json!(body.chars().take(limit).collect::<String>()),
+        );
         object.insert("body_truncated".into(), json!(total_chars > limit));
         object.insert("body_total_chars".into(), json!(total_chars));
     }

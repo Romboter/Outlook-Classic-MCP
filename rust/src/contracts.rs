@@ -78,13 +78,20 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         MailCommand::ListFolders(x) => {
             if x.max_depth.unwrap_or(2) > 4 {
                 Err("max_depth must be between 0 and 4".into())
-            } else { Ok(()) }
+            } else {
+                Ok(())
+            }
         }
         MailCommand::ListMails(x) => {
             checked_limit(x.limit)?;
-            if x.offset.unwrap_or(0) > 1000 { return Err("offset must be 0..1000".into()); }
+            if x.offset.unwrap_or(0) > 1000 {
+                return Err("offset must be 0..1000".into());
+            }
             if x.since.is_some() || x.until.is_some() {
-                return Err("since/until filters are not yet implemented; no date filter was applied".into());
+                return Err(
+                    "since/until filters are not yet implemented; no date filter was applied"
+                        .into(),
+                );
             }
             Ok(())
         }
@@ -93,7 +100,10 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
             if x.query.trim().is_empty() || x.query.len() > 160 {
                 return Err("query must contain 1..160 characters".into());
             }
-            if !matches!(x.scope.as_deref().unwrap_or("subject_body"), "subject" | "from" | "subject_body") {
+            if !matches!(
+                x.scope.as_deref().unwrap_or("subject_body"),
+                "subject" | "from" | "subject_body"
+            ) {
                 return Err("scope must be subject, from, or subject_body".into());
             }
             Ok(())
@@ -125,8 +135,13 @@ mod tests {
     #[test]
     fn rejects_unimplemented_options_rather_than_ignoring_them() {
         let req = MailCommand::ListMails(ListMailsParams {
-            folder: None, limit: None, offset: None, unread_only: None,
-            from_address: None, since: Some("2026-01-01".into()), until: None,
+            folder: None,
+            limit: None,
+            offset: None,
+            unread_only: None,
+            from_address: None,
+            since: Some("2026-01-01".into()),
+            until: None,
         });
         assert!(validate_command(&req).is_err());
     }

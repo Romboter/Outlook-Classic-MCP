@@ -2,8 +2,8 @@
 //!
 //! This is intentionally separate from the MCP tools until issue #4. No mail
 //! mutation operations or live mailbox tools are exposed by this module.
-use anyhow::{Context, Result, bail};
 use crate::contracts::{MailCommand, validate_command};
+use anyhow::{Context, Result, bail};
 use serde_json::Value;
 #[cfg(windows)]
 #[path = "outlook/mailbox.rs"]
@@ -87,7 +87,11 @@ impl OutlookBridge {
     pub fn execute(&self, command: MailCommand) -> Result<Value> {
         validate_command(&command).map_err(anyhow::Error::msg)?;
         let (tx, rx) = mpsc::channel();
-        self.sender.send(Request::Call { command, response: tx })
+        self.sender
+            .send(Request::Call {
+                command,
+                response: tx,
+            })
             .context("Outlook COM worker has exited")?;
         match rx.recv_timeout(Duration::from_secs(45)) {
             Ok(Ok(value)) => Ok(value),
@@ -344,7 +348,11 @@ mod win {
             .with_context(|| format!("Outlook {name} object conversion"))
     }
 
-    pub(super) fn method_object(object: &IDispatch, name: &str, args: Vec<VARIANT>) -> Result<IDispatch> {
+    pub(super) fn method_object(
+        object: &IDispatch,
+        name: &str,
+        args: Vec<VARIANT>,
+    ) -> Result<IDispatch> {
         IDispatch::try_from(&invoke(object, name, DISPATCH_METHOD, args)?)
             .with_context(|| format!("Outlook {name} returned non-object"))
     }

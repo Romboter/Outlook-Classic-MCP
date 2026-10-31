@@ -11,6 +11,9 @@ mod mailbox;
 #[cfg(windows)]
 #[path = "outlook/table.rs"]
 mod table;
+#[cfg(windows)]
+#[path = "outlook/refs.rs"]
+mod refs;
 use serde::Serialize;
 use std::{
     sync::mpsc::{self, Receiver, Sender},
@@ -223,6 +226,7 @@ fn run_worker(receiver: Receiver<Request>) {
 
 #[cfg(windows)]
 mod win {
+    use super::refs::MailRefs;
     use super::OutlookProbe;
     use anyhow::{Context, Result};
     use std::ptr;
@@ -376,6 +380,7 @@ mod win {
         // Both COM pointers live and drop on this worker apartment.
         _application: IDispatch,
         pub(super) namespace: IDispatch,
+        pub(super) refs: MailRefs,
     }
 
     impl Session {
@@ -397,6 +402,7 @@ mod win {
             Ok(Self {
                 _application: application,
                 namespace,
+                refs: MailRefs::new(),
             })
         }
 

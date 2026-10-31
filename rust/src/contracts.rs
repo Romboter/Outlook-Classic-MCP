@@ -61,6 +61,24 @@ pub struct GetMailParams {
     pub max_body_chars: Option<u32>,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ThreadParams {
+    /// Short handle from search/list or raw Outlook EntryID.
+    pub entry_id: String,
+    /// StoreID for raw identifiers in non-default stores.
+    pub store_id: Option<String>,
+    /// Default 10, range 1..30.
+    pub max_messages: Option<u32>,
+    /// Include plaintext bodies, default true.
+    pub include_bodies: Option<bool>,
+    /// Omit recognized quoted history, default true.
+    pub trim_quoted: Option<bool>,
+    /// Per-message Unicode character limit, default 1500, max 6000.
+    pub per_message_chars: Option<u32>,
+    /// Total Unicode character limit, default 8000, max 24000.
+    pub total_body_chars: Option<u32>,
+}
+
 #[derive(Debug, Clone)]
 pub enum MailCommand {
     WhoAmI,
@@ -68,6 +86,7 @@ pub enum MailCommand {
     ListMails(ListMailsParams),
     SearchMails(SearchMailsParams),
     GetMail(GetMailParams),
+    GetThread(ThreadParams),
 }
 
 pub fn checked_limit(input: Option<u32>) -> Result<usize, String> {

@@ -33,7 +33,7 @@ The MCP server itself **cannot send, move, edit, or delete email**. The tools re
 
 Known limitations before replacing Python:
 - Outlook COM calls have **not** been tested on a real Outlook Classic installation.
-- This branch tries **`Folder.GetTable`** for lightweight metadata-only folder listings and subject/sender searches; the `subject_body` scope still uses `Items.Restrict`. A fully indexed cross-folder `AdvancedSearch` implementation is **not complete** (#5). Each response reports the actual backend and elapsed time; see [local benchmark guide](docs/search-benchmark.md).
+- This branch tries **`Folder.GetTable`** for lightweight metadata-only folder listings and subject/sender searches; the `subject_body` scope still uses `Items.Restrict`. An opt-in `backend: indexed` implements event-driven `AdvancedSearch` + `Search.GetTable` for indexed stores, but is **unverified against real Outlook** (#5). Each response reports the actual backend and elapsed time; see [local benchmark guide](docs/search-benchmark.md).
 - The `since` and `until` parameters deliberately return unsupported errors rather than ignoring filters.
 - `ReceivedTime` is returned as **Windows-locale `received_local` text**, not an ISO timestamp. Do not interpret it as UTC.
 - Folder resolution currently supports default-store folders, not fully qualified shared/delegated stores.
@@ -44,7 +44,7 @@ For a protocol smoke test, run with an MCP client and call `outlook_rust_status`
 
 ## Experimental Table-backed queries (issue #5, partial)
 
-The Windows COM reader can obtain lightweight `Folder.GetTable` rows rather than constructing a complete Outlook MailItem for each result. Specify `backend: "table"`, `"legacy"` or `"auto"` (default) in `outlook_list_mails` and `outlook_search_mails` to compare equal queries. Table search currently supports `scope: "subject"` and `scope: "from"`; the `subject_body` mode stays on the compatibility backend. A store that cannot supply required Table columns triggers an explicitly labeled legacy fallback in `auto` mode.
+The Windows COM reader can obtain lightweight `Folder.GetTable` rows rather than constructing a complete Outlook MailItem for each result. Specify `backend: "table"`, `"legacy"` or `"auto"` (default) in `outlook_list_mails` and `outlook_search_mails` to compare equal queries. Table search supports `scope: "subject"` and `scope: "from"`; `subject_body` defaults to compatibility backend. Opt-in `backend: "indexed"` requires Instant Search, waits for the completion event, and supports `search_subfolders: true`. It never silently falls back. A store that cannot supply required Table columns triggers an explicitly labeled legacy fallback in `auto` mode.
 
 See [search benchmarking instructions](docs/search-benchmark.md). **No real-world speed gains have been measured yet**, and the Table backend is not equivalent to a completed indexed `AdvancedSearch` implementation.
 

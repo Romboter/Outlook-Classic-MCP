@@ -2,7 +2,8 @@
 //!
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
-use super::{MailCommand, win};
+use super::{MailCommand, table, win};
+use std::time::Instant;
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
 };
@@ -225,53 +226,115 @@ fn list_folders(namespace: &IDispatch, params: FolderParams) -> Result<Value> {
 }
 
 fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
+    let started = Instant::now();
     let limit = checked_limit(params.limit).map_err(anyhow::Error::msg)?;
     let folder = folder_path(namespace, params.folder.as_deref())?;
     let store_id = optional_text(&folder, "StoreID");
     let folder_name = optional_text(&folder, "Name");
-    let items = win::object_property(&folder, "Items")?;
-    sort_received(&items)?;
     let offset = params.offset.unwrap_or(0) as usize;
-    let (rows, has_more) = collect_items(
-        &items,
+    let instant_search_enabled = table::store_instant_search(&folder);
+
+    let queried = table::enumerate(
+        &folder,
         &store_id,
-        limit,
-        offset,
-        params.unread_only.unwrap_or(false),
-        params.from_address.as_deref(),
-    )?;
-    Ok(
-        json!({"folder":folder_name,"count":rows.len(),"limit":limit,
-        "offset":offset,"has_more":has_more,"items":rows}),
-    )
+        table::RowOptions {
+            filter: "",
+            limit,
+            offset,
+            unread_only: params.unread_only.unwrap_or(false),
+            sender_substring: params.from_address.as_deref(),
+        },
+    );
+
+    match queried {
+        Ok(page) => Ok(json!({
+            "folder": folder_name,
+            "count": page.items.len(), "limit": limit, "offset": offset,
+            "has_more": page.has_more, "items": page.items,
+            "backend": "folder_table", "scanned": page.scanned,
+            "scan_truncated": page.scan_truncated,
+            "instant_search_enabled": instant_search_enabled,
+            "elapsed_ms": started.elapsed().as_millis()
+        })),
+        Err(_table_error) => {
+            // Preserve function on stores that reject Table columns/filters.
+            // Never imply that the fallback was fast or indexed.
+            let items = win::object_property(&folder, "Items")?;
+            sort_received(&items)?;
+            let (rows, has_more) = collect_items(
+                &items, &store_id, limit, offset,
+                params.unread_only.unwrap_or(false),
+                params.from_address.as_deref(),
+            )?;
+            Ok(json!({
+                "folder": folder_name, "count": rows.len(), "limit": limit,
+                "offset": offset, "has_more": has_more, "items": rows,
+                "backend": "items_legacy_fallback",
+                "table_fallback": true,
+                "instant_search_enabled": instant_search_enabled,
+                "elapsed_ms": started.elapsed().as_millis()
+            }))
+        }
+    }
 }
 
 fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Value> {
+    let started = Instant::now();
     let limit = checked_limit(params.limit).map_err(anyhow::Error::msg)?;
     let folder = folder_path(namespace, params.folder.as_deref())?;
     let store_id = optional_text(&folder, "StoreID");
     let folder_name = optional_text(&folder, "Name");
-    let items = win::object_property(&folder, "Items")?;
+    let instant_search_enabled = table::store_instant_search(&folder);
     let safe_query = escape_dasl(params.query.trim());
-    // This is the existing Python-style DASL baseline; indexed
-    // AdvancedSearch/GetTable benchmarking is covered by issue #5.
     let scope = params.scope.as_deref().unwrap_or("subject_body");
+
+    // Only select subject/sender table filters whose properties are supported
+    // for folder tables. Body-inclusive search stays on the compatibility
+    // fallback until AdvancedSearch + Search.GetTable are implemented.
     let filter = match scope {
-        "subject" => format!("@SQL=\"urn:schemas:httpmail:subject\" LIKE '%{safe_query}%'"),
+        "subject" => format!("@SQL=\\\"urn:schemas:httpmail:subject\\\" LIKE '%{safe_query}%'"),
         "from" => format!(
-            "@SQL=(\"urn:schemas:httpmail:fromname\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:fromemail\" LIKE '%{safe_query}%')"
+            "@SQL=(\\\"urn:schemas:httpmail:fromname\\\" LIKE '%{safe_query}%' OR \\\"urn:schemas:httpmail:fromemail\\\" LIKE '%{safe_query}%')"
         ),
         _ => format!(
-            "@SQL=(\"urn:schemas:httpmail:subject\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:textdescription\" LIKE '%{safe_query}%')"
+            "@SQL=(\\\"urn:schemas:httpmail:subject\\\" LIKE '%{safe_query}%' OR \\\"urn:schemas:httpmail:textdescription\\\" LIKE '%{safe_query}%')"
         ),
     };
+
+    if scope != "subject_body" {
+        // Folder.GetTable evaluates the filter before row enumeration.
+        // It does not guarantee an indexed query even when Instant Search
+        // is enabled. Report only observed elapsed time, never speed claims.
+        if let Ok(page) = table::enumerate(
+            &folder,
+            &store_id,
+            table::RowOptions {
+                filter: &filter, limit, offset: 0,
+                unread_only: false, sender_substring: None,
+            },
+        ) {
+            return Ok(json!({
+                "query": params.query, "scope": scope, "folder": folder_name,
+                "count": page.items.len(), "has_more": page.has_more,
+                "items": page.items, "backend": "folder_table",
+                "scanned": page.scanned, "scan_truncated": page.scan_truncated,
+                "instant_search_enabled": instant_search_enabled,
+                "elapsed_ms": started.elapsed().as_millis()
+            }));
+        }
+    }
+    let items = win::object_property(&folder, "Items")?;
     let restricted = win::method_object(&items, "Restrict", vec![VARIANT::from(filter.as_str())])?;
     sort_received(&restricted)?;
     let (rows, has_more) = collect_items(&restricted, &store_id, limit, 0, false, None)?;
-    Ok(
-        json!({"query":params.query,"scope":scope, "folder":folder_name,
-        "count":rows.len(), "has_more":has_more,"items":rows}),
-    )
+    Ok(json!({
+        "query": params.query, "scope": scope, "folder": folder_name,
+        "count": rows.len(), "has_more": has_more, "items": rows,
+        "backend": "items_restrict_legacy",
+        "table_fallback": scope != "subject_body",
+        "instant_search_enabled": instant_search_enabled,
+        "elapsed_ms": started.elapsed().as_millis()
+    }))
 }
 
 fn get_mail(namespace: &IDispatch, params: GetMailParams) -> Result<Value> {

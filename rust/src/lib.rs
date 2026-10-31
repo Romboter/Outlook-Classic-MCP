@@ -4,8 +4,9 @@
 //! No mutating tools are registered, and no Outlook data is logged to stderr.
 pub mod contracts;
 pub mod outlook;
+pub mod thread_text;
 
-use contracts::{FolderParams, GetMailParams, ListMailsParams, MailCommand, SearchMailsParams};
+use contracts::{FolderParams, GetMailParams, ListMailsParams, MailCommand, SearchMailsParams, ThreadParams};
 use outlook::OutlookBridge;
 use rmcp::{
     ServerHandler,
@@ -118,6 +119,16 @@ impl OutlookMcp {
     }
 
     #[tool(
+        description = "Fetch a bounded Outlook conversation containing a mail handle. Uses exact ConversationID (not subject matching); chronological messages, conservative quoted-history trimming, per-message and total character ceilings. Raw originals remain accessible via outlook_get_mail."
+    )]
+    async fn outlook_get_thread(
+        &self,
+        Parameters(params): Parameters<ThreadParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::GetThread(params)).await
+    }
+
+    #[tool(
         description = "Read one Outlook Classic email. Pass the short entry_id handle returned by search/list (e.g. m1); legacy raw EntryIDs also work. Bounded plain-text body; HTML disabled."
     )]
     async fn outlook_get_mail(
@@ -149,7 +160,7 @@ mod tests {
     fn registered_tools_are_read_only() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -157,6 +168,7 @@ mod tests {
             "outlook_list_mails",
             "outlook_search_mails",
             "outlook_get_mail",
+            "outlook_get_thread",
         ] {
             assert!(names.contains(&expected));
         }

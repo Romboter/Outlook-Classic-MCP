@@ -32,6 +32,16 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+      - name: Format thread source for bootstrap validation (temporary)
+        run: cargo fmt --manifest-path rust/Cargo.toml --all
+      - name: Capture formatted thread source (temporary)
+        shell: pwsh
+        run: |
+          foreach ($file in @('rust/src/thread_text.rs', 'rust/src/outlook/thread.rs', 'rust/src/outlook/refs.rs', 'rust/src/outlook/mailbox.rs', 'rust/src/contracts.rs', 'rust/src/lib.rs', 'rust/src/outlook.rs')) {
+            Write-Output "BEGIN_THREAD_STAGE $file"
+            Write-Output ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $file))))
+            Write-Output "END_THREAD_STAGE $file"
+          }
       - name: Check formatting
         run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
       - name: Lint

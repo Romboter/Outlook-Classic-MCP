@@ -175,6 +175,25 @@ mod tests {
         assert!(checked_limit(Some(31)).is_err());
     }
     #[test]
+    fn validates_thread_limits_and_handle() {
+        let params = ThreadParams {
+            entry_id: "m7".into(), store_id: None, max_messages: Some(30),
+            include_bodies: Some(true), trim_quoted: Some(false),
+            per_message_chars: Some(6000), total_body_chars: Some(24000),
+        };
+        assert!(validate_command(&MailCommand::GetThread(params.clone())).is_ok());
+        let mut too_many=params.clone();
+        too_many.max_messages=Some(31);
+        assert!(validate_command(&MailCommand::GetThread(too_many)).is_err());
+        let mut too_large=params.clone();
+        too_large.total_body_chars=Some(24001);
+        assert!(validate_command(&MailCommand::GetThread(too_large)).is_err());
+        let mut empty=params;
+        empty.entry_id.clear();
+        assert!(validate_command(&MailCommand::GetThread(empty)).is_err());
+    }
+
+    #[test]
     fn escapes_dasl_literals() {
         assert_eq!(escape_dasl("O'Brien"), "O''Brien");
         assert_eq!(escape_dasl("\"hello\""), "\"hello\"");

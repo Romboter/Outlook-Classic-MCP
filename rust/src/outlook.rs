@@ -17,6 +17,9 @@ mod refs;
 #[cfg(windows)]
 #[path = "outlook/table.rs"]
 mod table;
+#[cfg(windows)]
+#[path = "outlook/thread.rs"]
+mod thread;
 use serde::Serialize;
 use std::{
     sync::mpsc::{self, Receiver, Sender},

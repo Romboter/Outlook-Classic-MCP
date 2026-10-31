@@ -409,6 +409,7 @@ impl win::Session {
                 indexed::search(&self._application, &folder, &params, &store_id)
             }
             MailCommand::SearchMails(params) => search_mails(&self.namespace, params),
+            MailCommand::GetThread(params) => self.read_thread(params),
             MailCommand::GetMail(mut params) => {
                 self.refs.resolve_input(&mut params)?;
                 get_mail(&self.namespace, params)

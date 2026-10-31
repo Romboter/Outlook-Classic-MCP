@@ -1,12 +1,12 @@
 # Outlook Classic MCP — Rust implementation
 
-> **Status: experimental read-only MCP implementation.** Five COM-backed mailbox tools are now exposed, but they still require live Outlook Classic testing on Windows. The existing Python implementation is unchanged.
+> **Status: experimental read-only MCP implementation.** Six COM-backed mailbox tools are now exposed, but they still require live Outlook Classic testing on Windows. The existing Python implementation is unchanged.
 
 This directory will contain a Windows-native rewrite optimized for **fast, low-token searches** against an already-running Outlook Classic profile. The goal is local stdio MCP, indexed Outlook search, concise search-result metadata, and full-message reads only when specifically requested.
 
 ## Current behavior
 
-The Rust executable exposes `outlook_rust_status` and five read-only MCP mailbox tools. On a Windows workstation with Outlook Classic running, you can also deliberately invoke the CLI probes:
+The Rust executable exposes `outlook_rust_status` and six read-only MCP mailbox tools. On a Windows workstation with Outlook Classic running, you can also deliberately invoke the CLI probes:
 
 ```powershell
 cargo run -- --probe-outlook
@@ -19,7 +19,7 @@ The first probe reads the bound profile's display name and Inbox counts. The sec
 
 ## Experimental read-only MCP tools (issue #4)
 
-The Rust stdio MCP now registers **five Outlook Classic tools**, in addition to the diagnostic `outlook_rust_status`. This is an **experimental implementation that has not been validated against an actual Outlook Classic profile**. Do not replace the existing Python MCP configuration in production yet.
+The Rust stdio MCP now registers **six Outlook Classic tools**, in addition to the diagnostic `outlook_rust_status`. This is an **experimental implementation that has not been validated against an actual Outlook Classic profile**. Do not replace the existing Python MCP configuration in production yet.
 
 | Tool | Behavior |
 | --- | --- |
@@ -28,6 +28,7 @@ The Rust stdio MCP now registers **five Outlook Classic tools**, in addition to 
 | `outlook_list_mails` | One folder, sorted latest first, metadata only; 10 items by default / max 30 |
 | `outlook_search_mails` | Outlook `Items.Restrict` baseline using escaped DASL; indexed search is issue #5 |
 | `outlook_get_mail` | Read one message by Outlook EntryID (optionally StoreID), with bounded plain-text body |
+| `outlook_get_thread` | Bounded native ConversationID retrieval, optional quoted history trimming and recoverable original per message |
 
 The MCP server itself **cannot send, move, edit, or delete email**. The tools return minimal JSON strings. Search/list results intentionally do not include email bodies. `get_mail` defaults to 4,000 characters and is capped at 12,000. HTML body retrieval is disabled. Invalid or unsupported arguments return explicit errors.
 
@@ -60,6 +61,14 @@ The Rust reader's `outlook_list_mails` and `outlook_search_mails` results return
 - The server does not persist these identifiers to disk or print them to stdout/stderr except inside the requested MCP tool response (with compact aliases).
 
 This is about output size and referential consistency, not search speed. Live Outlook verification remains outstanding.
+
+## Conversation retrieval (issue #7, experimental)
+
+A message returned by search/list can be used as the anchor for `outlook_get_thread`. It resolves the exact Outlook `ConversationID` and obtains `Conversation.GetTable` across folders/stores when available. Each message is returned with its own compact handle; quoted-history omissions and body truncation are explicitly flagged, and original message content can be fetched with `outlook_get_mail`.
+
+Defaults: latest 10 messages (chronologically displayed), at most 1,500 body characters per message, and at most 8,000 body characters total. Maximums: 30 messages, 6,000 characters per message, 24,000 characters total. Set `trim_quoted:false` to retain quote history within those budgets or `include_bodies:false` for metadata-only results.
+
+**Important:** The new retrieval path is unverified against a real Outlook Classic mailbox. Missing/deleted messages, cross-store IDs, and COM event/provider behavior must still be tested. See [conversation retrieval guide](docs/thread-retrieval.md).
 
 ## Build
 

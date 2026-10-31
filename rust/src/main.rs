@@ -13,7 +13,9 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         (Some(flag), None) if flag == "--help" || flag == "-h" => {
-            println!("outlook-mcp-rs [--help|--version]\n\nWith no arguments, serves a local MCP stdio connection.\nFoundation stage: Outlook mailbox tools are not implemented.");
+            println!(
+                "outlook-mcp-rs [--help|--version]\n\nWith no arguments, serves a local MCP stdio connection.\nFoundation stage: Outlook mailbox tools are not implemented."
+            );
             return Ok(());
         }
         (None, None) => {}

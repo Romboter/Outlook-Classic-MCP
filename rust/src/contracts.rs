@@ -124,9 +124,10 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
 }
 
 pub fn escape_dasl(raw: &str) -> String {
-    // DASL uses double quotation marks for property identifiers and apostrophe
-    // quotation marks for string literals. Escape both.
-    raw.replace('\'', "''").replace('"', "\"\"")
+    // User text is always a single-quoted DASL literal; double apostrophes
+    // to prevent injection. Double quotes inside the value are harmless and
+    // must not be changed (they delimit property identifiers, not values).
+    raw.replace('\'', "''")
 }
 
 #[cfg(test)]

@@ -208,7 +208,7 @@ mod win {
                 if message.message == WM_QUIT {
                     break;
                 }
-                TranslateMessage(&message);
+                let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
         }

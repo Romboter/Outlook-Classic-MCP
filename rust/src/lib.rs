@@ -98,7 +98,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "List up to 30 metadata-only mail summaries in one folder. Uses lightweight Folder.GetTable rows when supported; accepts backend auto/table/legacy."
+        description = "List up to 30 metadata-only mail summaries in one folder. EntryID fields are short session-scoped m1-style handles; call get_mail with a returned handle. Backends auto/table/legacy."
     )]
     async fn outlook_list_mails(
         &self,
@@ -108,7 +108,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Search one Outlook Classic folder with Table rows for subject/sender, or the legacy body-inclusive fallback. Returns compact metadata-only hits and measured elapsed_ms; accepts backend auto/table/legacy."
+        description = "Search one Outlook Classic folder and return compact metadata-only hits with session-scoped m1-style handles instead of long EntryIDs/StoreIDs. Backends auto/table/legacy; elapsed_ms is measured."
     )]
     async fn outlook_search_mails(
         &self,
@@ -118,7 +118,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Read a selected Outlook Classic message by EntryID, with an enforced plain-text body budget. HTML disabled."
+        description = "Read one Outlook Classic email. Pass the short entry_id handle returned by search/list (e.g. m1); legacy raw EntryIDs also work. Bounded plain-text body; HTML disabled."
     )]
     async fn outlook_get_mail(
         &self,
@@ -131,7 +131,7 @@ impl OutlookMcp {
 #[tool_handler(
     name = "outlook-classic-mcp-rs",
     version = "0.1.0",
-    instructions = "Experimental read-only Outlook Classic MCP. Requires locally running Outlook Classic on Windows. No sends/deletes or OST parsing. Search results contain EntryIDs and no bodies; fetch a selected message with outlook_get_mail. Responses are compact JSON. Do not claim this build has passed live Outlook testing."
+    instructions = "Experimental read-only Outlook Classic MCP. Requires locally running Outlook Classic on Windows. No sends/deletes or OST parsing. Search/list results contain short session-scoped entry_id handles instead of raw COM IDs; fetch a selected message with outlook_get_mail. Responses are compact JSON. Do not claim this build has passed live Outlook testing."
 )]
 impl ServerHandler for OutlookMcp {}
 

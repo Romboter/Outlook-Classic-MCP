@@ -148,6 +148,22 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
             }
             Ok(())
         }
+        MailCommand::GetThread(x) => {
+            if x.entry_id.is_empty() || x.entry_id.len() > 4096
+                || x.store_id.as_ref().is_some_and(|s| s.is_empty() || s.len() > 4096) {
+                return Err("invalid thread EntryID/StoreID".into());
+            }
+            if !(1..=30).contains(&x.max_messages.unwrap_or(10)) {
+                return Err("max_messages must be 1..30".into());
+            }
+            if !(1..=6000).contains(&x.per_message_chars.unwrap_or(1500)) {
+                return Err("per_message_chars must be 1..6000".into());
+            }
+            if !(1..=24000).contains(&x.total_body_chars.unwrap_or(8000)) {
+                return Err("total_body_chars must be 1..24000".into());
+            }
+            Ok(())
+        }
         MailCommand::GetMail(x) => {
             if x.entry_id.is_empty() || x.entry_id.len() > 4096 {
                 return Err("invalid EntryID length".into());

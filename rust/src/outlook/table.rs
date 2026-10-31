@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use windows::{
     Win32::System::{
         Com::{DISPATCH_METHOD, DISPATCH_PROPERTYGET, IDispatch},
-        Variant::{VARIANT, VAR_CHANGE_FLAGS, VT_BSTR, VariantChangeType},
+        Variant::{VAR_CHANGE_FLAGS, VARIANT, VT_BSTR, VariantChangeType},
     },
     core::BSTR,
 };
@@ -78,20 +78,45 @@ pub fn enumerate(folder: &IDispatch, store_id: &str, options: RowOptions<'_>) ->
     win::invoke(&columns, "RemoveAll", DISPATCH_METHOD, vec![])?;
 
     for column in ["EntryID", "Subject", "ReceivedTime", "MessageClass"] {
-        win::invoke(&columns, "Add", DISPATCH_METHOD, vec![VARIANT::from(column)])
-            .with_context(|| format!("Outlook Table lacks required column {column}"))?;
+        win::invoke(
+            &columns,
+            "Add",
+            DISPATCH_METHOD,
+            vec![VARIANT::from(column)],
+        )
+        .with_context(|| format!("Outlook Table lacks required column {column}"))?;
     }
     // Optional columns vary with store and message class. Missing values are
     // returned empty/null, not silently fetched via a separate MailItem.
     let mut sender_name_available = false;
     let mut sender_address_available = false;
-    if win::invoke(&columns, "Add", DISPATCH_METHOD, vec![VARIANT::from("SenderName")]).is_ok() {
+    if win::invoke(
+        &columns,
+        "Add",
+        DISPATCH_METHOD,
+        vec![VARIANT::from("SenderName")],
+    )
+    .is_ok()
+    {
         sender_name_available = true;
     }
-    if win::invoke(&columns, "Add", DISPATCH_METHOD, vec![VARIANT::from("SenderEmailAddress")]).is_ok() {
+    if win::invoke(
+        &columns,
+        "Add",
+        DISPATCH_METHOD,
+        vec![VARIANT::from("SenderEmailAddress")],
+    )
+    .is_ok()
+    {
         sender_address_available = true;
     }
-    let flags_available = win::invoke(&columns, "Add", DISPATCH_METHOD, vec![VARIANT::from(MESSAGE_FLAGS)]).is_ok();
+    let flags_available = win::invoke(
+        &columns,
+        "Add",
+        DISPATCH_METHOD,
+        vec![VARIANT::from(MESSAGE_FLAGS)],
+    )
+    .is_ok();
     if options.unread_only && !flags_available {
         bail!("provider does not expose PR_MESSAGE_FLAGS for unread filtering");
     }
@@ -99,9 +124,12 @@ pub fn enumerate(folder: &IDispatch, store_id: &str, options: RowOptions<'_>) ->
         bail!("provider does not expose sender columns for sender filtering");
     }
 
-    win::invoke(&table, "Sort", DISPATCH_METHOD, vec![
-        VARIANT::from("ReceivedTime"), VARIANT::from(true)
-    ])?;
+    win::invoke(
+        &table,
+        "Sort",
+        DISPATCH_METHOD,
+        vec![VARIANT::from("ReceivedTime"), VARIANT::from(true)],
+    )?;
     let sender_filter = options.sender_substring.map(str::to_lowercase);
     let mut collected = Vec::with_capacity(options.limit);
     let mut skipped = 0;
@@ -110,11 +138,18 @@ pub fn enumerate(folder: &IDispatch, store_id: &str, options: RowOptions<'_>) ->
     // EndOfTable is an explicit bool; never default to false on COM errors.
     loop {
         if scanned >= MAX_SCANNED {
-            return Ok(RowPage {items: collected, has_more: true, scanned, scan_truncated: true});
+            return Ok(RowPage {
+                items: collected,
+                has_more: true,
+                scanned,
+                scan_truncated: true,
+            });
         }
         let end = bool::try_from(&win::property(&table, "EndOfTable")?)
             .context("Outlook Table.EndOfTable returned an invalid value")?;
-        if end { break; }
+        if end {
+            break;
+        }
         scanned += 1;
         let row = win::method_object(&table, "GetNextRow", vec![])?;
         let class = text(&row, "MessageClass");
@@ -122,23 +157,45 @@ pub fn enumerate(folder: &IDispatch, store_id: &str, options: RowOptions<'_>) ->
             continue;
         }
         let entry_id = text(&row, "EntryID");
-        if entry_id.is_empty() { continue; }
+        if entry_id.is_empty() {
+            continue;
+        }
 
         let unread_state = if flags_available { unread(&row) } else { None };
         if options.unread_only {
             // Never include a message with unknown unread state.
-            if unread_state != Some(true) { continue; }
-        }
-        let sender_name = if sender_name_available { text(&row, "SenderName") } else { String::new() };
-        let sender_address = if sender_address_available { text(&row, "SenderEmailAddress") } else { String::new() };
-        if let Some(ref filter) = sender_filter {
-            if !sender_name.to_lowercase().contains(filter) && !sender_address.to_lowercase().contains(filter) {
+            if unread_state != Some(true) {
                 continue;
             }
         }
-        if skipped < options.offset { skipped += 1; continue; }
+        let sender_name = if sender_name_available {
+            text(&row, "SenderName")
+        } else {
+            String::new()
+        };
+        let sender_address = if sender_address_available {
+            text(&row, "SenderEmailAddress")
+        } else {
+            String::new()
+        };
+        if let Some(ref filter) = sender_filter {
+            if !sender_name.to_lowercase().contains(filter)
+                && !sender_address.to_lowercase().contains(filter)
+            {
+                continue;
+            }
+        }
+        if skipped < options.offset {
+            skipped += 1;
+            continue;
+        }
         if collected.len() >= options.limit {
-            return Ok(RowPage {items: collected, has_more: true, scanned, scan_truncated: false});
+            return Ok(RowPage {
+                items: collected,
+                has_more: true,
+                scanned,
+                scan_truncated: false,
+            });
         }
         collected.push(json!({
             "entry_id": entry_id,
@@ -151,7 +208,12 @@ pub fn enumerate(folder: &IDispatch, store_id: &str, options: RowOptions<'_>) ->
         }));
     }
 
-    Ok(RowPage {items: collected, has_more: false, scanned, scan_truncated: false})
+    Ok(RowPage {
+        items: collected,
+        has_more: false,
+        scanned,
+        scan_truncated: false,
+    })
 }
 
 #[cfg(test)]

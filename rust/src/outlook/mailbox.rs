@@ -3,12 +3,12 @@
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
 use super::{MailCommand, table, win};
-use std::time::Instant;
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
 };
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use std::time::Instant;
 use windows::{
     Win32::System::{
         Com::{DISPATCH_METHOD, IDispatch},
@@ -235,17 +235,21 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
     let instant_search_enabled = table::store_instant_search(&folder);
 
     let backend = params.backend.as_deref().unwrap_or("auto");
-    let queried = if backend == "legacy" { None } else { Some(table::enumerate(
-        &folder,
-        &store_id,
-        table::RowOptions {
-            filter: "",
-            limit,
-            offset,
-            unread_only: params.unread_only.unwrap_or(false),
-            sender_substring: params.from_address.as_deref(),
-        },
-    )) };
+    let queried = if backend == "legacy" {
+        None
+    } else {
+        Some(table::enumerate(
+            &folder,
+            &store_id,
+            table::RowOptions {
+                filter: "",
+                limit,
+                offset,
+                unread_only: params.unread_only.unwrap_or(false),
+                sender_substring: params.from_address.as_deref(),
+            },
+        ))
+    };
 
     match queried {
         Some(Ok(page)) => Ok(json!({
@@ -264,7 +268,10 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
             let items = win::object_property(&folder, "Items")?;
             sort_received(&items)?;
             let (rows, has_more) = collect_items(
-                &items, &store_id, limit, offset,
+                &items,
+                &store_id,
+                limit,
+                offset,
                 params.unread_only.unwrap_or(false),
                 params.from_address.as_deref(),
             )?;
@@ -291,7 +298,9 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
     let scope = params.scope.as_deref().unwrap_or("subject_body");
     let backend = params.backend.as_deref().unwrap_or("auto");
     if scope == "subject_body" && backend == "table" {
-        bail!("Folder.GetTable cannot reliably filter body text; use auto or legacy until indexed AdvancedSearch is implemented");
+        bail!(
+            "Folder.GetTable cannot reliably filter body text; use auto or legacy until indexed AdvancedSearch is implemented"
+        );
     }
 
     // Only select subject/sender table filters whose properties are supported
@@ -315,18 +324,23 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
             &folder,
             &store_id,
             table::RowOptions {
-                filter: &filter, limit, offset: 0,
-                unread_only: false, sender_substring: None,
+                filter: &filter,
+                limit,
+                offset: 0,
+                unread_only: false,
+                sender_substring: None,
             },
         ) {
-            Ok(page) => return Ok(json!({
-                "query": params.query, "scope": scope, "folder": folder_name,
-                "count": page.items.len(), "has_more": page.has_more,
-                "items": page.items, "backend": "folder_table",
-                "scanned": page.scanned, "scan_truncated": page.scan_truncated,
-                "instant_search_enabled": instant_search_enabled,
-                "elapsed_ms": started.elapsed().as_millis()
-            })),
+            Ok(page) => {
+                return Ok(json!({
+                    "query": params.query, "scope": scope, "folder": folder_name,
+                    "count": page.items.len(), "has_more": page.has_more,
+                    "items": page.items, "backend": "folder_table",
+                    "scanned": page.scanned, "scan_truncated": page.scan_truncated,
+                    "instant_search_enabled": instant_search_enabled,
+                    "elapsed_ms": started.elapsed().as_millis()
+                }));
+            }
             Err(error) if backend == "table" => return Err(error),
             Err(_) => {}
         }

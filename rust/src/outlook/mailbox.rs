@@ -234,7 +234,8 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
     let offset = params.offset.unwrap_or(0) as usize;
     let instant_search_enabled = table::store_instant_search(&folder);
 
-    let queried = table::enumerate(
+    let backend = params.backend.as_deref().unwrap_or("auto");
+    let queried = if backend == "legacy" { None } else { Some(table::enumerate(
         &folder,
         &store_id,
         table::RowOptions {
@@ -244,10 +245,10 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
             unread_only: params.unread_only.unwrap_or(false),
             sender_substring: params.from_address.as_deref(),
         },
-    );
+    )) };
 
     match queried {
-        Ok(page) => Ok(json!({
+        Some(Ok(page)) => Ok(json!({
             "folder": folder_name,
             "count": page.items.len(), "limit": limit, "offset": offset,
             "has_more": page.has_more, "items": page.items,
@@ -256,7 +257,8 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
             "instant_search_enabled": instant_search_enabled,
             "elapsed_ms": started.elapsed().as_millis()
         })),
-        Err(_table_error) => {
+        Some(Err(error)) if backend == "table" => Err(error),
+        _ => {
             // Preserve function on stores that reject Table columns/filters.
             // Never imply that the fallback was fast or indexed.
             let items = win::object_property(&folder, "Items")?;
@@ -270,7 +272,7 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
                 "folder": folder_name, "count": rows.len(), "limit": limit,
                 "offset": offset, "has_more": has_more, "items": rows,
                 "backend": "items_legacy_fallback",
-                "table_fallback": true,
+                "table_fallback": backend == "auto",
                 "instant_search_enabled": instant_search_enabled,
                 "elapsed_ms": started.elapsed().as_millis()
             }))
@@ -287,6 +289,10 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
     let instant_search_enabled = table::store_instant_search(&folder);
     let safe_query = escape_dasl(params.query.trim());
     let scope = params.scope.as_deref().unwrap_or("subject_body");
+    let backend = params.backend.as_deref().unwrap_or("auto");
+    if scope == "subject_body" && backend == "table" {
+        bail!("Folder.GetTable cannot reliably filter body text; use auto or legacy until indexed AdvancedSearch is implemented");
+    }
 
     // Only select subject/sender table filters whose properties are supported
     // for folder tables. Body-inclusive search stays on the compatibility
@@ -301,11 +307,11 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
         ),
     };
 
-    if scope != "subject_body" {
+    if scope != "subject_body" && backend != "legacy" {
         // Folder.GetTable evaluates the filter before row enumeration.
         // It does not guarantee an indexed query even when Instant Search
         // is enabled. Report only observed elapsed time, never speed claims.
-        if let Ok(page) = table::enumerate(
+        match table::enumerate(
             &folder,
             &store_id,
             table::RowOptions {
@@ -313,14 +319,16 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
                 unread_only: false, sender_substring: None,
             },
         ) {
-            return Ok(json!({
+            Ok(page) => return Ok(json!({
                 "query": params.query, "scope": scope, "folder": folder_name,
                 "count": page.items.len(), "has_more": page.has_more,
                 "items": page.items, "backend": "folder_table",
                 "scanned": page.scanned, "scan_truncated": page.scan_truncated,
                 "instant_search_enabled": instant_search_enabled,
                 "elapsed_ms": started.elapsed().as_millis()
-            }));
+            })),
+            Err(error) if backend == "table" => return Err(error),
+            Err(_) => {}
         }
     }
     let items = win::object_property(&folder, "Items")?;
@@ -331,7 +339,7 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
         "query": params.query, "scope": scope, "folder": folder_name,
         "count": rows.len(), "has_more": has_more, "items": rows,
         "backend": "items_restrict_legacy",
-        "table_fallback": scope != "subject_body",
+        "table_fallback": backend == "auto" && scope != "subject_body",
         "instant_search_enabled": instant_search_enabled,
         "elapsed_ms": started.elapsed().as_millis()
     }))

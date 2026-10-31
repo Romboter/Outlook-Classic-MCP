@@ -8,6 +8,9 @@ use serde_json::Value;
 #[cfg(windows)]
 #[path = "outlook/mailbox.rs"]
 mod mailbox;
+#[cfg(windows)]
+#[path = "outlook/table.rs"]
+mod table;
 use serde::Serialize;
 use std::{
     sync::mpsc::{self, Receiver, Sender},

@@ -154,8 +154,7 @@ impl Subscription {
         // created with a single COM reference owned by IUnknown. Advise takes
         // its own reference, dropped by Unadvise.
         let sink = unsafe { IUnknown::from_raw(raw.cast()) };
-        let mut cookie = 0u32;
-        unsafe { point.Advise(&sink, &mut cookie) }
+        let cookie = unsafe { point.Advise(&sink) }
             .context("Unable to subscribe to Outlook AdvancedSearchComplete")?;
         Ok(Self { point, cookie, _sink: sink, completed })
     }

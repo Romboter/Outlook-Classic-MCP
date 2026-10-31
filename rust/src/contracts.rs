@@ -82,7 +82,7 @@ fn validate_backend(name: Option<&str>, allow_indexed: bool) -> Result<(), Strin
     if matches!(name.unwrap_or("auto"), "auto" | "table" | "legacy") || (allow_indexed && name == Some("indexed")) {
         Ok(())
     } else {
-        Err("backend must be auto, table or legacy".into())
+        Err("backend must be auto, table, legacy or indexed (search only)".into())
     }
 }
 
@@ -112,7 +112,10 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         }
         MailCommand::SearchMails(x) => {
             checked_limit(x.limit)?;
-            validate_backend(x.backend.as_deref())?;
+            validate_backend(x.backend.as_deref(), true)?;
+            if x.search_subfolders.is_some() && x.backend.as_deref() != Some("indexed") {
+                return Err("search_subfolders requires backend=indexed".into());
+            }
             if x.query.trim().is_empty() || x.query.len() > 160 {
                 return Err("query must contain 1..160 characters".into());
             }

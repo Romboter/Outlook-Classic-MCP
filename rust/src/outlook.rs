@@ -44,17 +44,22 @@ impl OutlookBridge {
             .name("outlook-com-sta".into())
             .spawn(move || run_worker(receiver))
             .expect("unable to start Outlook COM worker");
-        Self { sender, _thread: handle }
+        Self {
+            sender,
+            _thread: handle,
+        }
     }
 
     /// Probe the currently running Outlook profile. The optional message
     /// subject is for explicit **local** diagnostics; it is never logged.
     pub fn probe(&self, include_first_subject: bool) -> Result<OutlookProbe> {
         let (tx, rx) = mpsc::channel();
-        self.sender.send(Request::Probe {
-            include_first_subject,
-            response: tx,
-        }).context("Outlook worker has exited")?;
+        self.sender
+            .send(Request::Probe {
+                include_first_subject,
+                response: tx,
+            })
+            .context("Outlook worker has exited")?;
 
         // Timeout is an unknown outcome (not cancellation of a COM call).
         // This operation is read-only; the worker may finish after timeout.
@@ -95,7 +100,10 @@ fn run_worker(receiver: Receiver<Request>) {
 
         match command {
             Request::Shutdown => break,
-            Request::Probe {include_first_subject, response} => {
+            Request::Probe {
+                include_first_subject,
+                response,
+            } => {
                 let result = match &initialization {
                     Ok(_) => {
                         if session.is_none() {
@@ -104,23 +112,21 @@ fn run_worker(receiver: Receiver<Request>) {
                         // An absent COM instance is an error, not a reason to
                         // auto-launch Outlook or fabricate mailbox results.
                         match &mut session {
-                            Some(existing) => {
-                                match existing.probe(include_first_subject) {
-                                    Ok(value) => Ok(value),
-                                    Err(error) if win::is_disconnect(&error) => {
-                                        session = None;
-                                        match win::Session::attach() {
-                                            Ok(new_session) => {
-                                                let result = new_session.probe(include_first_subject);
-                                                session = Some(new_session);
-                                                result
-                                            }
-                                            Err(error) => Err(error),
+                            Some(existing) => match existing.probe(include_first_subject) {
+                                Ok(value) => Ok(value),
+                                Err(error) if win::is_disconnect(&error) => {
+                                    session = None;
+                                    match win::Session::attach() {
+                                        Ok(mut new_session) => {
+                                            let result = new_session.probe(include_first_subject);
+                                            session = Some(new_session);
+                                            result
                                         }
+                                        Err(error) => Err(error),
                                     }
-                                    Err(error) => Err(error),
                                 }
-                            }
+                                Err(error) => Err(error),
+                            },
                             None => Err(anyhow::anyhow!(
                                 "Cannot attach to Outlook Classic. Open Outlook under this Windows account and ensure its profile is ready."
                             )),
@@ -154,21 +160,21 @@ mod win {
     use anyhow::{Context, Result};
     use std::ptr;
     use windows::{
-        core::{BSTR, GUID, IUnknown, Interface, PCWSTR},
         Win32::{
             System::{
                 Com::{
-                    CLSIDFromProgID, CoInitializeEx, CoUninitialize, DISPATCH_FLAGS,
-                    DISPATCH_METHOD, DISPATCH_PROPERTYGET, DISPPARAMS,
-                    COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, IDispatch,
+                    CLSIDFromProgID, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+                    CoInitializeEx, CoUninitialize, DISPATCH_FLAGS, DISPATCH_METHOD,
+                    DISPATCH_PROPERTYGET, DISPPARAMS, IDispatch,
                 },
                 Ole::GetActiveObject,
                 Variant::VARIANT,
             },
             UI::WindowsAndMessaging::{
-                DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE, WM_QUIT,
+                DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, TranslateMessage, WM_QUIT,
             },
         },
+        core::{BSTR, GUID, IUnknown, Interface, PCWSTR},
     };
 
     pub struct ComApartment;
@@ -187,7 +193,9 @@ mod win {
     impl Drop for ComApartment {
         fn drop(&mut self) {
             // SAFETY: Runs on the same worker thread that initialized COM.
-            unsafe { CoUninitialize(); }
+            unsafe {
+                CoUninitialize();
+            }
         }
     }
 
@@ -197,7 +205,9 @@ mod win {
         unsafe {
             let mut message = MSG::default();
             while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
-                if message.message == WM_QUIT { break; }
+                if message.message == WM_QUIT {
+                    break;
+                }
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
@@ -205,16 +215,28 @@ mod win {
     }
 
     pub fn is_disconnect(err: &anyhow::Error) -> bool {
-        err.chain().filter_map(|cause| cause.downcast_ref::<windows::core::Error>()).any(|error| {
-            matches!(
-                error.code().0 as u32,
-                0x800706BA | 0x800706BE | 0x800706BF | 0x80010108
-                    | 0x80010007 | 0x80010012 | 0x800401FD
-            )
-        })
+        err.chain()
+            .filter_map(|cause| cause.downcast_ref::<windows::core::Error>())
+            .any(|error| {
+                matches!(
+                    error.code().0 as u32,
+                    0x800706BA
+                        | 0x800706BE
+                        | 0x800706BF
+                        | 0x80010108
+                        | 0x80010007
+                        | 0x80010012
+                        | 0x800401FD
+                )
+            })
     }
 
-    fn invoke(object: &IDispatch, member: &str, flags: DISPATCH_FLAGS, mut args: Vec<VARIANT>) -> Result<VARIANT> {
+    fn invoke(
+        object: &IDispatch,
+        member: &str,
+        flags: DISPATCH_FLAGS,
+        mut args: Vec<VARIANT>,
+    ) -> Result<VARIANT> {
         let name: Vec<u16> = member.encode_utf16().chain(std::iter::once(0)).collect();
         let names = [PCWSTR(name.as_ptr())];
         let iid_null = GUID::from_u128(0);
@@ -222,17 +244,32 @@ mod win {
         // SAFETY: All pointers reference live stack data, and IDispatch is
         // invoked on the same STA that acquired it.
         unsafe {
-            object.GetIDsOfNames(&iid_null, names.as_ptr(), 1, 0, &mut id)
+            object
+                .GetIDsOfNames(&iid_null, names.as_ptr(), 1, 0, &mut id)
                 .with_context(|| format!("Outlook member lookup: {member}"))?;
             args.reverse(); // IDispatch positional arguments are reversed.
             let parameters = DISPPARAMS {
-                rgvarg: if args.is_empty() { ptr::null_mut() } else { args.as_mut_ptr() },
+                rgvarg: if args.is_empty() {
+                    ptr::null_mut()
+                } else {
+                    args.as_mut_ptr()
+                },
                 rgdispidNamedArgs: ptr::null_mut(),
                 cArgs: args.len() as u32,
                 cNamedArgs: 0,
             };
             let mut result = VARIANT::default();
-            object.Invoke(id, &iid_null, 0, flags, &parameters, Some(&mut result), None, None)
+            object
+                .Invoke(
+                    id,
+                    &iid_null,
+                    0,
+                    flags,
+                    &parameters,
+                    Some(&mut result),
+                    None,
+                    None,
+                )
                 .with_context(|| format!("Outlook invoke: {member}"))?;
             Ok(result)
         }
@@ -243,7 +280,8 @@ mod win {
     }
 
     fn object_property(object: &IDispatch, name: &str) -> Result<IDispatch> {
-        IDispatch::try_from(&property(object, name)?).with_context(|| format!("Outlook {name} object conversion"))
+        IDispatch::try_from(&property(object, name)?)
+            .with_context(|| format!("Outlook {name} object conversion"))
     }
 
     fn method_object(object: &IDispatch, name: &str, args: Vec<VARIANT>) -> Result<IDispatch> {
@@ -278,16 +316,27 @@ mod win {
             let mut unknown: Option<IUnknown> = None;
             unsafe { GetActiveObject(&clsid, None, &mut unknown) }
                 .context("Outlook Classic is not running or is not registered in the COM Running Object Table")?;
-            let application: IDispatch = unknown.context("GetActiveObject returned null")?
-                .cast().context("Active Outlook instance does not expose IDispatch")?;
-            let namespace = method_object(&application, "GetNamespace", vec![VARIANT::from("MAPI")])?;
-            Ok(Self { _application: application, namespace })
+            let application: IDispatch =
+                unknown
+                    .context("GetActiveObject returned null")?
+                    .cast()
+                    .context("Active Outlook instance does not expose IDispatch")?;
+            let namespace =
+                method_object(&application, "GetNamespace", vec![VARIANT::from("MAPI")])?;
+            Ok(Self {
+                _application: application,
+                namespace,
+            })
         }
 
         pub fn probe(&mut self, first_subject: bool) -> Result<OutlookProbe> {
             let current = object_property(&self.namespace, "CurrentUser")?;
             let current_user = string_property(&current, "Name")?;
-            let inbox = method_object(&self.namespace, "GetDefaultFolder", vec![VARIANT::from(6i32)])?;
+            let inbox = method_object(
+                &self.namespace,
+                "GetDefaultFolder",
+                vec![VARIANT::from(6i32)],
+            )?;
             let inbox_name = string_property(&inbox, "Name")?;
             let folders = object_property(&inbox, "Folders")?;
             let inbox_subfolders = int_property(&folders, "Count")?;
@@ -296,7 +345,9 @@ mod win {
             let first_item_subject = if first_subject && inbox_items > 0 {
                 let first = method_object(&items, "Item", vec![VARIANT::from(1i32)])?;
                 Some(string_property(&first, "Subject")?)
-            } else { None };
+            } else {
+                None
+            };
             Ok(OutlookProbe {
                 current_user,
                 inbox_name,

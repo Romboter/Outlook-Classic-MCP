@@ -32,7 +32,9 @@ async fn main() -> Result<()> {
 
     // On stdio transport, stdout is reserved for JSON-RPC. Diagnostics must
     // only use stderr. The server currently has no mailbox operations.
-    eprintln!("outlook-mcp-rs: MCP diagnostics only; Outlook COM is accessible through an explicit local --probe-outlook command");
+    eprintln!(
+        "outlook-mcp-rs: MCP diagnostics only; Outlook COM is accessible through an explicit local --probe-outlook command"
+    );
     let server = OutlookMcp.serve(stdio()).await?;
     server.waiting().await?;
     Ok(())

@@ -149,8 +149,12 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
             Ok(())
         }
         MailCommand::GetThread(x) => {
-            if x.entry_id.is_empty() || x.entry_id.len() > 4096
-                || x.store_id.as_ref().is_some_and(|s| s.is_empty() || s.len() > 4096) {
+            if x.entry_id.is_empty()
+                || x.entry_id.len() > 4096
+                || x.store_id
+                    .as_ref()
+                    .is_some_and(|s| s.is_empty() || s.len() > 4096)
+            {
                 return Err("invalid thread EntryID/StoreID".into());
             }
             if !(1..=30).contains(&x.max_messages.unwrap_or(10)) {
@@ -212,18 +216,22 @@ mod tests {
     #[test]
     fn validates_thread_limits_and_handle() {
         let params = ThreadParams {
-            entry_id: "m7".into(), store_id: None, max_messages: Some(30),
-            include_bodies: Some(true), trim_quoted: Some(false),
-            per_message_chars: Some(6000), total_body_chars: Some(24000),
+            entry_id: "m7".into(),
+            store_id: None,
+            max_messages: Some(30),
+            include_bodies: Some(true),
+            trim_quoted: Some(false),
+            per_message_chars: Some(6000),
+            total_body_chars: Some(24000),
         };
         assert!(validate_command(&MailCommand::GetThread(params.clone())).is_ok());
-        let mut too_many=params.clone();
-        too_many.max_messages=Some(31);
+        let mut too_many = params.clone();
+        too_many.max_messages = Some(31);
         assert!(validate_command(&MailCommand::GetThread(too_many)).is_err());
-        let mut too_large=params.clone();
-        too_large.total_body_chars=Some(24001);
+        let mut too_large = params.clone();
+        too_large.total_body_chars = Some(24001);
         assert!(validate_command(&MailCommand::GetThread(too_large)).is_err());
-        let mut empty=params;
+        let mut empty = params;
         empty.entry_id.clear();
         assert!(validate_command(&MailCommand::GetThread(empty)).is_err());
     }

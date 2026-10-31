@@ -195,20 +195,20 @@ mod tests {
 
     #[test]
     fn thread_messages_never_leak_entry_or_store_id() {
-        let mut refs=MailRefs::new();
-        let mut output=json!({"messages":[
+        let mut refs = MailRefs::new();
+        let mut output = json!({"messages":[
             {"entry_id":"super-long-secret-entry","store_id":"super-long-secret-store","body":"Hello"},
             {"entry_id":"second-entry","store_id":"second-store","body":"Reply"}
         ],"count":2});
         refs.compact_response(&mut output);
-        assert_eq!(output["messages"][0]["entry_id"],"m1");
-        assert_eq!(output["messages"][1]["entry_id"],"m2");
+        assert_eq!(output["messages"][0]["entry_id"], "m1");
+        assert_eq!(output["messages"][1]["entry_id"], "m2");
         assert!(!output.to_string().contains("secret"));
         assert!(output["messages"][0].get("store_id").is_none());
-        let mut request=selected("m1",None);
+        let mut request = selected("m1", None);
         refs.resolve_input(&mut request).unwrap();
-        assert_eq!(request.entry_id,"super-long-secret-entry");
-        assert_eq!(request.store_id.as_deref(),Some("super-long-secret-store"));
+        assert_eq!(request.entry_id, "super-long-secret-entry");
+        assert_eq!(request.store_id.as_deref(), Some("super-long-secret-store"));
     }
 
     #[test]

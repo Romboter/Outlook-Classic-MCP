@@ -6,7 +6,9 @@ pub mod contracts;
 pub mod outlook;
 pub mod thread_text;
 
-use contracts::{FolderParams, GetMailParams, ListMailsParams, MailCommand, SearchMailsParams, ThreadParams};
+use contracts::{
+    FolderParams, GetMailParams, ListMailsParams, MailCommand, SearchMailsParams, ThreadParams,
+};
 use outlook::OutlookBridge;
 use rmcp::{
     ServerHandler,

@@ -292,12 +292,12 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
     // for folder tables. Body-inclusive search stays on the compatibility
     // fallback until AdvancedSearch + Search.GetTable are implemented.
     let filter = match scope {
-        "subject" => format!("@SQL=\\\"urn:schemas:httpmail:subject\\\" LIKE '%{safe_query}%'"),
+        "subject" => format!("@SQL=\"urn:schemas:httpmail:subject\" LIKE '%{safe_query}%'"),
         "from" => format!(
-            "@SQL=(\\\"urn:schemas:httpmail:fromname\\\" LIKE '%{safe_query}%' OR \\\"urn:schemas:httpmail:fromemail\\\" LIKE '%{safe_query}%')"
+            "@SQL=(\"urn:schemas:httpmail:fromname\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:fromemail\" LIKE '%{safe_query}%')"
         ),
         _ => format!(
-            "@SQL=(\\\"urn:schemas:httpmail:subject\\\" LIKE '%{safe_query}%' OR \\\"urn:schemas:httpmail:textdescription\\\" LIKE '%{safe_query}%')"
+            "@SQL=(\"urn:schemas:httpmail:subject\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:textdescription\" LIKE '%{safe_query}%')"
         ),
     };
 

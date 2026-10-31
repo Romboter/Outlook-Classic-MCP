@@ -178,12 +178,11 @@ pub fn enumerate(folder: &IDispatch, store_id: &str, options: RowOptions<'_>) ->
         } else {
             String::new()
         };
-        if let Some(ref filter) = sender_filter {
-            if !sender_name.to_lowercase().contains(filter)
-                && !sender_address.to_lowercase().contains(filter)
-            {
-                continue;
-            }
+        if let Some(ref filter) = sender_filter
+            && !sender_name.to_lowercase().contains(filter)
+            && !sender_address.to_lowercase().contains(filter)
+        {
+            continue;
         }
         if skipped < options.offset {
             skipped += 1;

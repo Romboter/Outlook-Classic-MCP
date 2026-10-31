@@ -27,6 +27,8 @@ pub struct ListMailsParams {
     pub since: Option<String>,
     /// ISO-8601 upper date bound, reserved for future compatibility.
     pub until: Option<String>,
+    /// Force auto, table or legacy backend to compare identical queries.
+    pub backend: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -39,6 +41,8 @@ pub struct SearchMailsParams {
     pub limit: Option<u32>,
     /// Search fields: subject, from, or subject_body (default).
     pub scope: Option<String>,
+    /// Backend: auto (default), table, or legacy. Table supports subject/from only.
+    pub backend: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -72,6 +76,14 @@ pub fn checked_limit(input: Option<u32>) -> Result<usize, String> {
     Ok(n as usize)
 }
 
+fn validate_backend(name: Option<&str>) -> Result<(), String> {
+    if matches!(name.unwrap_or("auto"), "auto" | "table" | "legacy") {
+        Ok(())
+    } else {
+        Err("backend must be auto, table or legacy".into())
+    }
+}
+
 pub fn validate_command(command: &MailCommand) -> Result<(), String> {
     match command {
         MailCommand::WhoAmI => Ok(()),
@@ -84,6 +96,7 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         }
         MailCommand::ListMails(x) => {
             checked_limit(x.limit)?;
+            validate_backend(x.backend.as_deref())?;
             if x.offset.unwrap_or(0) > 1000 {
                 return Err("offset must be 0..1000".into());
             }
@@ -97,6 +110,7 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         }
         MailCommand::SearchMails(x) => {
             checked_limit(x.limit)?;
+            validate_backend(x.backend.as_deref())?;
             if x.query.trim().is_empty() || x.query.len() > 160 {
                 return Err("query must contain 1..160 characters".into());
             }
@@ -143,6 +157,7 @@ mod tests {
             from_address: None,
             since: Some("2026-01-01".into()),
             until: None,
+            backend: None,
         });
         assert!(validate_command(&req).is_err());
     }

@@ -7,3 +7,6 @@ __pycache__/
 build/
 dist/
 .ui-preview/
+
+# Rust build artifacts (keep rust/Cargo.lock committed)
+rust/target/

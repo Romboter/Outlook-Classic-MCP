@@ -48,6 +48,19 @@ The Windows COM reader can obtain lightweight `Folder.GetTable` rows rather than
 
 See [search benchmarking instructions](docs/search-benchmark.md). **No real-world speed gains have been measured yet**, and the Table backend is not equivalent to a completed indexed `AdvancedSearch` implementation.
 
+## Compact session message references (issue #6)
+
+The Rust reader's `outlook_list_mails` and `outlook_search_mails` results return short handles like `"entry_id": "m1"` instead of multi-hundred-character Outlook EntryIDs and StoreIDs. Pass the handle unchanged in `outlook_get_mail`'s `entry_id` argument; the server resolves the exact EntryID **and StoreID** inside the COM STA session. The response from `outlook_get_mail` is also sanitized so full identifiers do not appear in Claude's context.
+
+- References are stable within one live COM session for the same (EntryID, StoreID).
+- A bounded cache stores at most 2,048 identities; older handles may expire and return an explicit error.
+- Outlook restart/reconnection or restarting the MCP server invalidates handles; repeat your search/list operation to obtain new ones.
+- Original raw EntryIDs remain accepted as input for compatibility, but are not returned by the new read-only tools.
+- Handles are **not access-control tokens**; the MCP process already has the local Outlook user's permissions.
+- The server does not persist these identifiers to disk or print them to stdout/stderr except inside the requested MCP tool response (with compact aliases).
+
+This is about output size and referential consistency, not search speed. Live Outlook verification remains outstanding.
+
 ## Build
 
 Requires Rust **1.88+** (edition 2024) on Windows for eventual COM integration.

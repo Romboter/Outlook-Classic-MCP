@@ -1,5 +1,7 @@
 # Outlook Classic MCP — Rust implementation
 
+**Project documentation and step-by-step runbooks:** [`../docs/README.md`](../docs/README.md). For a live test use [COM validation](../docs/runbooks/03-outlook-com-validation.md) and [MCP smoke test](../docs/runbooks/04-mcp-smoke-test.md). Do not replace the working Python MCP until release gates pass.
+
 > **Status: experimental read-only MCP implementation.** Six COM-backed mailbox tools are now exposed, but they still require live Outlook Classic testing on Windows. The existing Python implementation is unchanged.
 
 This directory will contain a Windows-native rewrite optimized for **fast, low-token searches** against an already-running Outlook Classic profile. The goal is local stdio MCP, indexed Outlook search, concise search-result metadata, and full-message reads only when specifically requested.
@@ -26,8 +28,8 @@ The Rust stdio MCP now registers **six Outlook Classic tools**, in addition to t
 | `outlook_whoami` | Current Outlook display name |
 | `outlook_list_folders` | Default mailbox root (or a supplied folder), maximum depth 4 / 100 entries |
 | `outlook_list_mails` | One folder, sorted latest first, metadata only; 10 items by default / max 30 |
-| `outlook_search_mails` | Outlook `Items.Restrict` baseline using escaped DASL; indexed search is issue #5 |
-| `outlook_get_mail` | Read one message by Outlook EntryID (optionally StoreID), with bounded plain-text body |
+| `outlook_search_mails` | Metadata-only search using Table/legacy, or experimental opt-in indexed AdvancedSearch + GetTable |
+| `outlook_get_mail` | Read one message by short session handle (or raw EntryID for compatibility), with bounded plain-text body |
 | `outlook_get_thread` | Bounded native ConversationID retrieval, optional quoted history trimming and recoverable original per message |
 
 The MCP server itself **cannot send, move, edit, or delete email**. The tools return minimal JSON strings. Search/list results intentionally do not include email bodies. `get_mail` defaults to 4,000 characters and is capped at 12,000. HTML body retrieval is disabled. Invalid or unsupported arguments return explicit errors.
@@ -38,7 +40,7 @@ Known limitations before replacing Python:
 - The `since` and `until` parameters deliberately return unsupported errors rather than ignoring filters.
 - `ReceivedTime` is returned as **Windows-locale `received_local` text**, not an ISO timestamp. Do not interpret it as UTC.
 - Folder resolution currently supports default-store folders, not fully qualified shared/delegated stores.
-- Long `EntryID` values are currently included in results; shorter agent-facing IDs are tracked in #6.
+- Short `mN` message references from #6 are implemented in draft code and replace long EntryID/StoreID values in list/search/read/thread output. Handles are in-memory and expire when the COM session restarts or the 2,048-entry cache evicts entries.
 - A timeout is not a cancellation: a queued **read** may finish later. No writes are exposed.
 
 For a protocol smoke test, run with an MCP client and call `outlook_rust_status` without Outlook. The actual mailbox tools require the running interactive Outlook Classic process and the Windows user profile hosting the MCP process.
@@ -112,6 +114,7 @@ The MCP SDK is pinned at `rmcp =3.5.1`. The checked-in `Cargo.lock` pins transit
 - [#4](https://github.com/Romboter/Outlook-Classic-MCP/issues/4) Five functioning read-only tools.
 - [#5](https://github.com/Romboter/Outlook-Classic-MCP/issues/5) Indexed Outlook search benchmarking and implementation.
 - [#6](https://github.com/Romboter/Outlook-Classic-MCP/issues/6) Token-minimal result design.
+- [#7](https://github.com/Romboter/Outlook-Classic-MCP/issues/7) Read-only conversation retrieval and quoted-history handling.
 
 ## Layout
 
@@ -122,8 +125,13 @@ rust/
     main.rs     # stdio entry point
     lib.rs      # Read-only MCP tool router
     contracts.rs # Schema + parameter validation
+    thread_text.rs # Safe text trimming and Unicode budgets
     outlook.rs  # STA COM worker and explicit CLI probe
     outlook/mailbox.rs # Bounded read-only COM operations
+    outlook/table.rs   # Lightweight row enumeration
+    outlook/indexed.rs # Opt-in async indexed search
+    outlook/refs.rs    # Short session-scoped mail handles
+    outlook/thread.rs  # Conversation retrieval
   compatibility/
     tools.md    # existing Python tool inventory
 ```

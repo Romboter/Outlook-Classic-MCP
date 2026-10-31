@@ -1,5 +1,8 @@
 # outlook-classic-mcp
 
+> **Romboter fork-specific development:** This repository includes an **experimental Rust rewrite** in `rust/`, under draft PRs #12–#18. Its real Outlook Classic integration has **not** been validated. For the project overview, architecture, runbooks, safety and testing guides, start at [`/docs`](docs/README.md). The Python instructions below describe the original implementation and may mention the original author's package or marketplace; they are **not** instructions to synchronize or PR this fork against upstream.
+
+
 ![outlook-classic-mcp banner](src/public/outlook-classic-mcp-banner.png)
 
 A local **MCP (Model Context Protocol) server** that exposes the **classic

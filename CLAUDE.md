@@ -14,6 +14,7 @@ Read [#1](https://github.com/Romboter/Outlook-Classic-MCP/issues/1), then the in
 - Read-only MCP [#4](https://github.com/Romboter/Outlook-Classic-MCP/issues/4)
 - Indexed search [#5](https://github.com/Romboter/Outlook-Classic-MCP/issues/5)
 - Token-efficiency [#6](https://github.com/Romboter/Outlook-Classic-MCP/issues/6)
+- Conversation retrieval [#7](https://github.com/Romboter/Outlook-Classic-MCP/issues/7)
 
 The primary user's needs: Outlook **Classic** is always running at work and caches about one year of mail. Claude Code should search existing indexed mail quickly without filling its context. No direct OST parsing or separate Tantivy/SQLite index for the initial implementation.
 
@@ -21,7 +22,7 @@ The primary user's needs: Outlook **Classic** is always running at work and cach
 
 The working Python server is in `src/outlook_mcp/`. Keep it working during Rust development. The experimental Rust crate lives in `rust/`. Do not redirect existing plugin/client configurations until Rust has passed real Outlook Classic integration tests. No false-positive tools that claim to read mail before the COM adapter exists.
 
-Preserve 31-tool compatibility where possible; see `rust/compatibility/tools.md`. Rust foundation intentionally exposes only `outlook_rust_status`.
+Preserve 31-tool compatibility where possible; see `rust/compatibility/tools.md`. The Rust branch stack through draft PR #18 exposes six experimental read-only Outlook tools plus `outlook_rust_status`; do **not** claim this code is merged to `main` or tested against an actual Outlook Classic mailbox.
 
 ## Technical / security guardrails
 
@@ -34,6 +35,10 @@ Preserve 31-tool compatibility where possible; see `rust/compatibility/tools.md`
 - Add tests for schemas, protocol behavior, COM error handling, and search budgets.
 - Preserve the project's MIT license terms and credit for derived source.
 - Do not create timers, background workers, or services that are not explicitly needed for a live interactive Outlook profile.
+
+## Project documentation
+
+Start at [`docs/README.md`](docs/README.md) for architecture, tool contracts, development rules, risk notes and task-specific runbooks under `docs/runbooks/`. Maintain runbooks as behavior changes, link test evidence to the relevant issue and never publish private mailbox content. The detailed original search/thread testing notes also remain at `rust/docs/`.
 
 ## Completion standards
 

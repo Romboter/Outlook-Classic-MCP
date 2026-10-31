@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
         }
         (Some(flag), None) if flag == "--help" || flag == "-h" => {
             println!(
-                "outlook-mcp-rs [--help|--version|--probe-outlook|--probe-first-mail]\n\nWith no arguments, serves a local MCP stdio connection.\nCOM probe stage: MCP mailbox tools are not implemented."
+                "outlook-mcp-rs [--help|--version|--probe-outlook|--probe-first-mail]\n\nWith no arguments, serves a local MCP stdio connection.\nExperimental read-only MCP tools are enabled; no write operations. Outlook Classic must already be running."
             );
             return Ok(());
         }
@@ -31,11 +31,11 @@ async fn main() -> Result<()> {
     }
 
     // On stdio transport, stdout is reserved for JSON-RPC. Diagnostics must
-    // only use stderr. The server currently has no mailbox operations.
+    // only use stderr. Outlook calls are dispatched to the dedicated STA.
     eprintln!(
-        "outlook-mcp-rs: MCP diagnostics only; Outlook COM is accessible through an explicit local --probe-outlook command"
+        "outlook-mcp-rs: experimental read-only Outlook Classic MCP; no live COM validation yet"
     );
-    let server = OutlookMcp.serve(stdio()).await?;
+    let server = OutlookMcp::new().serve(stdio()).await?;
     server.waiting().await?;
     Ok(())
 }

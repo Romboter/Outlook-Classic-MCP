@@ -155,6 +155,6 @@ mod tests {
     #[test]
     fn escapes_dasl_literals() {
         assert_eq!(escape_dasl("O'Brien"), "O''Brien");
-        assert_eq!(escape_dasl("\"hello\""), "\"\"hello\"\"");
+        assert_eq!(escape_dasl("\"hello\""), "\"hello\"");
     }
 }

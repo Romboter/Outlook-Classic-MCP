@@ -2,6 +2,33 @@
 
 **Status: experimental / no live Outlook measurements yet.** Use these steps only on a trusted Windows workstation running Outlook **Classic** with an active cached profile. This is not an OST parser or an Exchange/Microsoft Graph client.
 
+## Experimental indexed AdvancedSearch backend (opt-in)
+
+The `outlook_search_mails` call now accepts `"backend": "indexed"`. This is **experimental**: it has been compiled against Windows, but must be tested with real Outlook Classic before being treated as reliable. `auto` intentionally **does not select** this backend until live testing verifies completion-event delivery, result correctness, and performance.
+
+- Uses `Application.AdvancedSearch` with a **DASL filter without `@SQL=`**.
+- Uses `ci_phrasematch` against subject, sender, or subject+body; it requires `Store.IsInstantSearchEnabled == true`.
+- Subscribes to `ApplicationEvents_11.AdvancedSearchComplete` **before** starting the search; matches the unique `Search.Tag` so another client's completion is not mistaken for ours.
+- Pumps the dedicated COM STA's messages while waiting; only after completion does it call `Search.GetTable` for lightweight metadata rows.
+- Uses an 18-second internal timeout; requests `Search.Stop` on timeout and unadvises the event sink.
+- `search_subfolders: true` searches below the selected folder; defaults false. Folder scopes use a quoted `FolderPath`. Do not use it to search multiple Exchange stores.
+- An index-unavailable, search-error, or event-timeout result is a visible error in forced `indexed` mode. It **never silently reports success** or substitutes an unindexed scan.
+
+Example parameters:
+
+```json
+{"folder":"Inbox","query":"quarterly","scope":"subject_body","backend":"indexed","limit":10,"search_subfolders":false}
+```
+
+**Additional live verification needed:** Outlook event interface registration, completion Tag matching, `Search.GetTable` column support across Exchange/PST providers, phrase-query semantics, query timing and size of the local cached index. Do not publish benchmarks until these checks are performed.
+
+### Important event-handling source references
+
+- https://learn.microsoft.com/en-us/office/vba/api/outlook.application.advancedsearch
+- https://learn.microsoft.com/en-us/office/vba/api/outlook.application.advancedsearchcomplete
+- https://learn.microsoft.com/en-us/office/vba/api/outlook.search.gettable
+- https://learn.microsoft.com/en-us/dotnet/api/microsoft.office.interop.outlook.applicationevents_11?view=outlook-pia
+
 ## Backends available in this branch
 
 | Backend | Mode | What it does |

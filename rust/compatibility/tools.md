@@ -2,7 +2,7 @@
 
 **Baseline:** Python server in this fork at `src/outlook_mcp/tools/` and `src/outlook_mcp/client/`, version 0.3.2 at the start of the rewrite. This inventory enumerates all **31** existing `outlook_*` tools; it is a **migration checklist**, not a statement of Rust support.
 
-**Rust status as of first scaffold:** none of the 31 are implemented. Only the separate `outlook_rust_status` diagnostic tool exists.
+**Current draft implementation (2026-10-31, through PR #18):** five names from the existing Python inventory are implemented experimentally in Rust: `outlook_whoami`, `outlook_list_folders`, `outlook_list_mails`, `outlook_search_mails`, and `outlook_get_mail`. The Rust branch stack additionally registers `outlook_get_thread` and `outlook_rust_status` (not part of the 31-tool original inventory). **Live Outlook Classic validation is still outstanding; no Rust changes are merged to `main`.**
 
 | Existing tool | Category | Operation | Python source | Rust milestone |
 | --- | --- | --- | --- | --- |
@@ -53,11 +53,11 @@
 
 Before closing #2, capture and check a **complete machine-readable schema snapshot** from the Python server, covering each tool's input JSON Schema, defaults, descriptions, annotations, and result shapes. Maintain redacted fixtures only, no actual company emails. The table above is inventory; it is **not** a full schema snapshot.
 
-## Proposed additional tools (NOT part of 31-tool compatibility set)
+## Additional tools (NOT part of 31-tool compatibility set)
 
 - `outlook_search`: metadata-only indexed search; ~10 results by default.
 - `outlook_search_more`: request additional results by an opaque cursor.
-- `outlook_get_thread`: retrieve a bounded email conversation.
-- `outlook_rust_status`: current scaffold-only diagnostic tool.
+- `outlook_get_thread`: implemented experimentally in draft PR #18; live conversation/store behavior not verified.
+- `outlook_rust_status`: implemented static diagnostic tool; does not test a live Outlook connection.
 
 Do not advertise the proposed tools as implemented before corresponding issues close.

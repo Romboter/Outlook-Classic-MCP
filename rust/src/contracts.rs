@@ -47,7 +47,7 @@ pub struct SearchMailsParams {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct GetMailParams {
-    /// Outlook EntryID returned by a list/search result.
+    /// Short session-scoped entry_id handle from list/search (e.g. m1), or a raw Outlook EntryID for compatibility.
     pub entry_id: String,
     /// Outlook StoreID when reading an item from a non-default store.
     pub store_id: Option<String>,

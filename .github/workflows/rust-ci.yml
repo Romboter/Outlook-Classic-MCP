@@ -32,23 +32,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-      - name: Generate provisional lockfile (must be committed before closing #2)
-        run: cargo generate-lockfile --manifest-path rust/Cargo.toml
-      - name: Emit provisional lockfile for review (temporary)
-        shell: pwsh
-        run: |
-          Write-Output 'BEGIN_OUTLOOK_LOCKFILE_B64'
-          $raw = [System.IO.File]::ReadAllBytes((Resolve-Path rust/Cargo.lock))
-          Write-Output ([Convert]::ToBase64String($raw))
-          Write-Output 'END_OUTLOOK_LOCKFILE_B64'
       - name: Check formatting
         run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
       - name: Lint
-        run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --manifest-path rust/Cargo.toml --all-targets -- -D warnings
       - name: Run unit tests
-        run: cargo test --manifest-path rust/Cargo.toml --all-targets
+        run: cargo test --locked --manifest-path rust/Cargo.toml --all-targets
       - name: Build
-        run: cargo build --manifest-path rust/Cargo.toml
+        run: cargo build --locked --manifest-path rust/Cargo.toml
       - name: Check that server help works
         shell: pwsh
         run: |

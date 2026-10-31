@@ -31,7 +31,7 @@ To inspect the protocol, use an MCP client or the MCP Inspector. **Do not regist
 
 ### Dependency and lockfile policy
 
-The MCP SDK is pinned at `rmcp =3.5.1` pending Windows CI validation. Other direct dependencies currently use semver ranges. A checked-in `Cargo.lock` is **required before declaring this milestone complete**. Generate it using `cargo generate-lockfile`, review, commit, then switch CI to `--locked` for all Cargo build/test commands. Do not mark issue #2 complete until compilation and tests run successfully.
+The MCP SDK is pinned at `rmcp =3.5.1`. The checked-in `Cargo.lock` pins transitive dependencies; CI uses `--locked` for builds, linting, and tests. Update the lockfile intentionally via `cargo update` or `cargo generate-lockfile` on a review branch, and include it in the same PR as dependency changes. Live Outlook COM behavior is not tested by this scaffold.
 
 ## Design constraints
 

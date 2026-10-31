@@ -195,7 +195,7 @@ pub fn search(
         .context("Unable to read Outlook FolderPath for AdvancedSearch scope")?;
     // Microsoft specifies single-quoted folder paths. A literal apostrophe
     // must be doubled to remain part of the folder name.
-    let scope = format!("'{}'", scope_name.replace(''', "''"));
+    let scope = format!("'{}'", scope_name.replace('\'', "''"));
     let search_filter = filter(
         params.query.trim(), params.scope.as_deref().unwrap_or("subject_body")
     );

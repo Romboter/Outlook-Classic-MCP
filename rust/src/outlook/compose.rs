@@ -334,6 +334,14 @@ pub(super) fn send(namespace: &IDispatch, draft: &DraftRef, preview: &Preview) -
     }
 }
 
+/// Newest items checked per folder. Outlook cannot filter on a custom
+/// property server-side, so this is a bounded scan, not a search of everything.
+const LOCATE_SCAN: [(i32, &str, i32); 3] = [
+    (OL_FOLDER_SENT, "sent", 200),
+    (OL_FOLDER_OUTBOX, "queued", 100),
+    (OL_FOLDER_DRAFTS, "drafts", 200),
+];
+
 pub(super) fn locate(namespace: &IDispatch, send_id: &str) -> Result<Value> {
     if send_id.is_empty()
         || send_id.len() > 80
@@ -343,23 +351,33 @@ pub(super) fn locate(namespace: &IDispatch, send_id: &str) -> Result<Value> {
     {
         bail!("invalid send_id");
     }
-    let filter = format!(
-        "@SQL=\"http://schemas.microsoft.com/mapi/string/{{00020329-0000-0000-C000-000000000046}}/{STAMP}\" = '{send_id}'"
-    );
-    for (folder, place) in [
-        (OL_FOLDER_SENT, "sent"),
-        (OL_FOLDER_OUTBOX, "queued"),
-        (OL_FOLDER_DRAFTS, "drafts"),
-    ] {
-        let found = default_folder(namespace, folder)
-            .and_then(|f| win::object_property(&f, "Items"))
-            .and_then(|items| {
-                win::method_object(&items, "Restrict", vec![VARIANT::from(filter.as_str())])
-            })
-            .and_then(|hits| win::int_property(&hits, "Count"))
-            .unwrap_or(0);
-        if found > 0 {
-            return Ok(json!({"location": place}));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    for (folder, place, cap) in LOCATE_SCAN {
+        let Ok(items) =
+            default_folder(namespace, folder).and_then(|f| win::object_property(&f, "Items"))
+        else {
+            continue;
+        };
+        // Newest first, so a recent send is found after a handful of items.
+        let _ = win::invoke(
+            &items,
+            "Sort",
+            DISPATCH_METHOD,
+            vec![VARIANT::from("[LastModificationTime]"), VARIANT::from(true)],
+        );
+        let count = win::int_property(&items, "Count")
+            .unwrap_or(0)
+            .clamp(0, cap);
+        for i in 1..=count {
+            if std::time::Instant::now() > deadline {
+                return Ok(json!({"location": "unknown", "scan_truncated": true}));
+            }
+            let Ok(item) = win::method_object(&items, "Item", vec![VARIANT::from(i)]) else {
+                continue;
+            };
+            if stamp_of(&item).as_deref() == Some(send_id) {
+                return Ok(json!({"location": place}));
+            }
         }
     }
     Ok(json!({"location": "unknown"}))

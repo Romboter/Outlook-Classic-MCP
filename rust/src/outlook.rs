@@ -28,6 +28,9 @@ mod refs;
 #[path = "outlook/schedule.rs"]
 mod schedule;
 #[cfg(windows)]
+#[path = "outlook/schedule_write.rs"]
+mod schedule_write;
+#[cfg(windows)]
 #[path = "outlook/table.rs"]
 mod table;
 #[cfg(windows)]

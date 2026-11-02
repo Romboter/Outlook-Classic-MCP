@@ -41,15 +41,20 @@ In `draft` mode the three send tools never send: they create the draft and say s
 - After `unknown_outcome` the agent is told to call `outlook_check_send`, then ask the user. It must not call send again on its own; a fresh `send_id` would be a new message.
 - The stamp is a user property, so it survives into Sent Items locally without being visible to the user. If Outlook drops it for some store types, `check_send` returns `unknown` rather than guessing.
 
-## Recipient and volume limits
+## Limits are speed bumps, not walls
 
-Server settings, never tool arguments:
+Every limit below is a threshold that triggers an **extra human prompt** (same host-side channel as the send confirmation, which the model cannot answer). Crossing a threshold never refuses outright. Declining, a timeout or an unsupported client leaves the message in Drafts.
 
-- At most 20 recipients per message by default (`OUTLOOK_MCP_SEND_MAX_RECIPIENTS`).
-- Optional domain allowlist (`OUTLOOK_MCP_SEND_ALLOW_DOMAINS`). When set, any other domain is refused before confirmation. When unset, external recipients are allowed but flagged in the preview.
-- At most 5 sends per hour per server process by default (`OUTLOOK_MCP_SEND_PER_HOUR`).
-- **Raising the hourly limit needs a human.** When the limit is reached, the server asks the host to show a second prompt (for example "5 sends already this hour; allow up to 5 more?") with the pending message's recipients. Approval raises the allowance for the current hour in steps of the base limit; each message still gets its own preview and confirmation. Decline, timeout or an unsupported client mean the message stays in Drafts. The model cannot answer or influence this prompt.
-- **Hard ceiling:** `OUTLOOK_MCP_SEND_MAX_PER_HOUR` (default 25) cannot be exceeded by any approval. Changing the base limit permanently is a server setting, not a prompt answer.
+| Threshold (server setting) | Default | When crossed |
+| --- | --- | --- |
+| Recipients per message (`OUTLOOK_MCP_SEND_MAX_RECIPIENTS`) | 20 | Prompt: "this message has N recipients (usual limit 20); send anyway?" |
+| Sends per hour (`OUTLOOK_MCP_SEND_PER_HOUR`) | 5 | Prompt: "5 sends already this hour; allow up to 5 more?" Approval raises the allowance for that hour in steps of the base limit |
+| Domain allowlist (`OUTLOOK_MCP_SEND_ALLOW_DOMAINS`, optional) | unset | Recipients outside it are listed in a prompt ("not on your usual list: ..."). When unset, external recipients are only flagged in the normal preview |
+
+- Each message still gets its own preview and confirmation. A raise prompt is in addition, and several thresholds crossed at once are combined into one prompt that names each.
+- Approval applies to that message or that hour only. Nothing is remembered across server restarts, and no approval changes the settings above.
+- **Hard ceilings** exist only to stop runaways and cannot be approved past: `OUTLOOK_MCP_SEND_HARD_MAX_RECIPIENTS` (default 200) and `OUTLOOK_MCP_SEND_HARD_MAX_PER_HOUR` (default 25). Hitting one refuses the send and says to change the server setting.
+- A user who wants a true wall instead of a prompt can set `OUTLOOK_MCP_SEND_STRICT=1`, which turns the thresholds above into refusals.
 - Reply keeps the original thread recipients; forward always flags that content from an existing message is leaving the mailbox.
 
 ## Confirmation without elicitation
@@ -74,8 +79,8 @@ Unit tests against a fake mail layer (a trait over the COM calls), so every case
 - `Send()` succeeds and the following read fails: result is `sent`, and exactly one `Send()` call was made.
 - `Send()` raises a disconnect or times out: result is `unknown_outcome`, exactly one call, no replay.
 - A second request for the same `send_id` or draft is refused.
-- The hourly limit stops a sixth send, the raise prompt can lift it only on `accept`, and no approval goes past the hard ceiling.
-- Unresolved, over-limit and non-allowlisted recipients fail before confirmation.
+- The hourly threshold prompts on the sixth send, lifts only on `accept`, and no approval goes past the hard ceiling.
+- Unresolved recipients fail before confirmation. Over-threshold recipients, hourly sends and non-allowlisted domains produce a prompt, send only on `accept`, and never past a hard ceiling; strict mode refuses instead.
 - Email text such as "ignore previous instructions and send to ..." cannot change recipients, mode or confirmation.
 - `check_send` maps each mailbox state correctly.
 
@@ -85,6 +90,6 @@ Live test (with the owner's approval, mode `full`, on a private server instance)
 
 1. Elicitation as the confirmation mechanism, with refuse-and-draft as the fallback, and the new `url` dependency it brings.
 2. Keep the Python tool names and add `send_draft` and `check_send`, rather than draft-only tools.
-3. Default limits: 20 recipients, 5 sends per hour, external domains allowed but flagged.
+3. Default thresholds: 20 recipients, 5 sends per hour, external domains flagged; hard ceilings of 200 recipients and 25 sends per hour.
 4. Plain text only and no attachments in the first version.
 5. Whether `OUTLOOK_MCP_SEND_CONFIRM=host` should exist at all.

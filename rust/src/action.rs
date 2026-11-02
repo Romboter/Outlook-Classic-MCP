@@ -28,6 +28,8 @@ pub struct ActionSettings {
     pub delete_hard_max_per_hour: usize,
     pub rule_per_hour: usize,
     pub rule_hard_max_per_hour: usize,
+    pub response_per_hour: usize,
+    pub response_hard_max_per_hour: usize,
     pub strict: bool,
 }
 
@@ -38,6 +40,8 @@ impl Default for ActionSettings {
             delete_hard_max_per_hour: 50,
             rule_per_hour: 5,
             rule_hard_max_per_hour: 20,
+            response_per_hour: 10,
+            response_hard_max_per_hour: 50,
             strict: false,
         }
     }
@@ -72,6 +76,11 @@ impl ActionSettings {
                 "OUTLOOK_MCP_RULE_HARD_MAX_PER_HOUR",
                 defaults.rule_hard_max_per_hour,
             )?,
+            response_per_hour: number("OUTLOOK_MCP_RESPONSE_PER_HOUR", defaults.response_per_hour)?,
+            response_hard_max_per_hour: number(
+                "OUTLOOK_MCP_RESPONSE_HARD_MAX_PER_HOUR",
+                defaults.response_hard_max_per_hour,
+            )?,
             strict: matches!(
                 get("OUTLOOK_MCP_ACTION_STRICT")
                     .map(|v| v.trim().to_ascii_lowercase())
@@ -81,6 +90,7 @@ impl ActionSettings {
         };
         if settings.delete_hard_max_per_hour < settings.delete_per_hour
             || settings.rule_hard_max_per_hour < settings.rule_per_hour
+            || settings.response_hard_max_per_hour < settings.response_per_hour
         {
             return Err("hard action ceilings must not be below the usual limits".into());
         }
@@ -91,6 +101,7 @@ impl ActionSettings {
     fn limits(&self, kind: ActionKind) -> (usize, usize) {
         match kind.class() {
             "rules" => (self.rule_per_hour, self.rule_hard_max_per_hour),
+            "responses" => (self.response_per_hour, self.response_hard_max_per_hour),
             _ => (self.delete_per_hour, self.delete_hard_max_per_hour),
         }
     }
@@ -101,6 +112,7 @@ pub enum ActionKind {
     DeleteMail,
     DeleteEvent,
     ToggleRule,
+    RespondEvent,
 }
 
 impl ActionKind {
@@ -109,6 +121,7 @@ impl ActionKind {
             ActionKind::DeleteMail => "delete_mail",
             ActionKind::DeleteEvent => "delete_event",
             ActionKind::ToggleRule => "toggle_rule",
+            ActionKind::RespondEvent => "respond_event",
         }
     }
 
@@ -117,21 +130,15 @@ impl ActionKind {
         match self {
             ActionKind::DeleteMail | ActionKind::DeleteEvent => "deletes",
             ActionKind::ToggleRule => "rules",
+            ActionKind::RespondEvent => "responses",
         }
     }
 
     fn label(self) -> &'static str {
         match self.class() {
             "rules" => "rule changes",
+            "responses" => "meeting responses",
             _ => "deletes",
-        }
-    }
-
-    /// The permission this kind of action needs.
-    pub fn capability(self) -> Capability {
-        match self {
-            ActionKind::DeleteMail | ActionKind::DeleteEvent => Capability::Delete,
-            ActionKind::ToggleRule => Capability::Rules,
         }
     }
 }
@@ -144,6 +151,22 @@ pub struct ActionTarget {
     pub store_id: Option<String>,
     /// For rule changes: the state being asked for.
     pub enabled: Option<bool>,
+    /// For meeting responses: `accept`, `tentative` or `decline` (`enabled` then
+    /// says whether a reply is emailed to the organizer).
+    pub response: Option<String>,
+}
+
+impl ActionTarget {
+    /// The permission this request needs. Telling an organizer needs `send`; a
+    /// local-only answer only changes the user's own calendar.
+    pub fn capability(&self) -> Capability {
+        match self.kind {
+            ActionKind::DeleteMail | ActionKind::DeleteEvent => Capability::Delete,
+            ActionKind::ToggleRule => Capability::Rules,
+            ActionKind::RespondEvent if self.enabled == Some(false) => Capability::Events,
+            ActionKind::RespondEvent => Capability::Send,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -572,6 +595,7 @@ mod tests {
             entry_id: id.into(),
             store_id: None,
             enabled: None,
+            response: None,
         }
     }
 
@@ -703,6 +727,7 @@ mod tests {
             entry_id: name.into(),
             store_id: None,
             enabled: Some(on),
+            response: None,
         }
     }
 
@@ -714,6 +739,7 @@ mod tests {
             rule_per_hour: 2,
             rule_hard_max_per_hour: 3,
             strict: false,
+            ..ActionSettings::default()
         };
         let port = FakePort::new();
         let calls = Arc::clone(&port.execute_calls);
@@ -733,11 +759,53 @@ mod tests {
         assert!(!prompts[1].contains("OUTSIDE THE USUAL LIMITS"));
     }
 
+    #[tokio::test]
+    async fn meeting_responses_have_their_own_counter() {
+        let settings = ActionSettings {
+            response_per_hour: 1,
+            response_hard_max_per_hour: 2,
+            ..ActionSettings::default()
+        };
+        let port = FakePort::new();
+        let (e, prompts) = engine(port, Confirmation::Accepted, settings);
+        let respond = |n: usize| ActionTarget {
+            kind: ActionKind::RespondEvent,
+            entry_id: format!("m{n}"),
+            store_id: None,
+            enabled: Some(true),
+            response: Some("accept".into()),
+        };
+        // Deletes and rule changes do not use up meeting responses.
+        assert_eq!(status(&e.run(target("m9")).await), "done");
+        assert_eq!(status(&e.run(rule_target("r", true)).await), "done");
+        assert_eq!(status(&e.run(respond(1)).await), "done");
+        assert_eq!(status(&e.run(respond(2)).await), "done");
+        assert_eq!(status(&e.run(respond(3)).await), "refused");
+        let prompts = prompts.lock().unwrap();
+        assert!(prompts[3].contains("meeting responses already this hour"));
+    }
+
     #[test]
     fn kinds_map_to_their_capabilities() {
-        assert_eq!(ActionKind::DeleteMail.capability(), Capability::Delete);
-        assert_eq!(ActionKind::DeleteEvent.capability(), Capability::Delete);
-        assert_eq!(ActionKind::ToggleRule.capability(), Capability::Rules);
+        let of = |kind, enabled| {
+            ActionTarget {
+                kind,
+                entry_id: "x".into(),
+                store_id: None,
+                enabled,
+                response: None,
+            }
+            .capability()
+        };
+        assert_eq!(of(ActionKind::DeleteMail, None), Capability::Delete);
+        assert_eq!(of(ActionKind::DeleteEvent, None), Capability::Delete);
+        assert_eq!(of(ActionKind::ToggleRule, Some(true)), Capability::Rules);
+        assert_eq!(of(ActionKind::RespondEvent, Some(true)), Capability::Send);
+        assert_eq!(of(ActionKind::RespondEvent, None), Capability::Send);
+        assert_eq!(
+            of(ActionKind::RespondEvent, Some(false)),
+            Capability::Events
+        );
     }
 
     #[tokio::test]

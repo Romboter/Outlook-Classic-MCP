@@ -546,6 +546,32 @@ pub struct CheckActionParams {
     pub action_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct RespondEventParams {
+    /// Short handle from list_events, or a raw Outlook EntryID, of a meeting invitation you received.
+    pub entry_id: String,
+    pub store_id: Option<String>,
+    /// accept, tentative or decline.
+    pub response: String,
+    /// Email the answer to the organizer (default true). false only changes your own calendar.
+    pub send_response: Option<bool>,
+}
+
+pub fn prepare_respond_event(x: &RespondEventParams) -> Result<ActionTarget, String> {
+    checked_id(&x.entry_id, x.store_id.as_deref())?;
+    let response = x.response.trim().to_ascii_lowercase();
+    if !matches!(response.as_str(), "accept" | "tentative" | "decline") {
+        return Err("response must be accept, tentative or decline".into());
+    }
+    Ok(ActionTarget {
+        kind: ActionKind::RespondEvent,
+        entry_id: x.entry_id.clone(),
+        store_id: x.store_id.clone(),
+        enabled: Some(x.send_response.unwrap_or(true)),
+        response: Some(response),
+    })
+}
+
 pub fn prepare_delete(x: &DeleteItemParams, kind: ActionKind) -> Result<ActionTarget, String> {
     checked_id(&x.entry_id, x.store_id.as_deref())?;
     Ok(ActionTarget {
@@ -553,6 +579,7 @@ pub fn prepare_delete(x: &DeleteItemParams, kind: ActionKind) -> Result<ActionTa
         entry_id: x.entry_id.clone(),
         store_id: x.store_id.clone(),
         enabled: None,
+        response: None,
     })
 }
 
@@ -577,6 +604,7 @@ pub fn prepare_toggle_rule(x: &ToggleRuleParams) -> Result<ActionTarget, String>
         entry_id: name.to_string(),
         store_id: None,
         enabled: Some(x.enabled),
+        response: None,
     })
 }
 
@@ -679,7 +707,7 @@ impl MailCommand {
             | MailCommand::ComposeLocate(_)
             | MailCommand::ActionLocate { .. } => Capability::Read,
             MailCommand::ActionPrepare(target) | MailCommand::ActionExecute { target, .. } => {
-                target.kind.capability()
+                target.capability()
             }
             MailCommand::ComposePrepare(_) => Capability::Draft,
             MailCommand::ComposeSend { .. } => Capability::Send,
@@ -1204,6 +1232,38 @@ mod tests {
                 },
                 ActionKind::DeleteEvent
             )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn meeting_responses_validate_and_pick_capability_from_whether_a_reply_is_sent() {
+        let params = |response: &str, send: Option<bool>| RespondEventParams {
+            entry_id: "m1".into(),
+            store_id: None,
+            response: response.into(),
+            send_response: send,
+        };
+        let sending = prepare_respond_event(&params("Accept", None)).unwrap();
+        assert_eq!(sending.response.as_deref(), Some("accept"));
+        assert_eq!(sending.enabled, Some(true));
+        assert_eq!(
+            MailCommand::ActionPrepare(sending).capability(),
+            Capability::Send
+        );
+        let local = prepare_respond_event(&params("decline", Some(false))).unwrap();
+        assert_eq!(
+            MailCommand::ActionPrepare(local).capability(),
+            Capability::Events
+        );
+        assert!(prepare_respond_event(&params("maybe", None)).is_err());
+        assert!(
+            prepare_respond_event(&RespondEventParams {
+                entry_id: "".into(),
+                store_id: None,
+                response: "accept".into(),
+                send_response: None
+            })
             .is_err()
         );
     }

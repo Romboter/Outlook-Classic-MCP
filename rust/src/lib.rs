@@ -8,25 +8,35 @@ pub mod localtime;
 pub mod outlook;
 pub mod policy;
 pub mod safe_path;
+pub mod send;
 pub mod thread_text;
 pub mod ticket;
 
 use contracts::{
-    CreateFolderParams, FolderParams, GetContactParams, GetEventParams, GetMailParams,
-    ListContactsParams, ListEventsParams, ListMailsParams, ListTasksParams, MailCommand,
-    MarkMailParams, MoveMailParams, ResolveNameParams, SearchContactsParams, SearchMailsParams,
-    SetCategoryParams, ThreadParams,
+    CheckSendParams, CreateFolderParams, FolderParams, ForwardMailParams, GetContactParams,
+    GetEventParams, GetMailParams, ListContactsParams, ListEventsParams, ListMailsParams,
+    ListTasksParams, MailCommand, MarkMailParams, MoveMailParams, ReplyMailParams,
+    ResolveNameParams, SearchContactsParams, SearchMailsParams, SendDraftParams, SendMailParams,
+    SetCategoryParams, ThreadParams, checked_send_id, prepare_forward_mail, prepare_reply_mail,
+    prepare_send_mail,
 };
 use outlook::OutlookBridge;
-use policy::Policy;
+use policy::{Capability, Policy};
 use rmcp::{
-    ServerHandler,
+    Peer, RoleServer, ServerHandler, elicit_safe,
     handler::server::wrapper::Parameters,
     model::{CallToolResult, ContentBlock},
+    schemars::JsonSchema,
+    service::ElicitationError,
     tool, tool_handler, tool_router,
 };
-use serde::Serialize;
+use send::{
+    Confirmation, Confirmer, Delivery, DraftRef, Engine, Location, MailPort, Outcome, PortError,
+    PrepareRequest, Prepared, Preview, SendLedger, SendSettings,
+};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use ticket::NOT_SENT;
 use ticket::UNKNOWN_OUTCOME;
 
 /// The Rust implementation is experimental until tested against a real
@@ -55,6 +65,141 @@ pub fn foundation_status() -> FoundationStatus {
 pub struct OutlookMcp {
     bridge: Arc<OutlookBridge>,
     policy: Policy,
+    send_settings: SendSettings,
+    ledger: Arc<SendLedger>,
+}
+
+/// The form the host shows the human. Only a person at the host can fill it in.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SendDecision {
+    /// Tick to send this email now. Leave unticked to keep it as a draft.
+    confirm: bool,
+}
+elicit_safe!(SendDecision);
+
+struct ElicitConfirmer {
+    peer: Peer<RoleServer>,
+}
+
+impl Confirmer for ElicitConfirmer {
+    async fn confirm(&self, prompt: &str) -> Confirmation {
+        let wait = std::time::Duration::from_secs(120);
+        match self
+            .peer
+            .elicit_with_timeout::<SendDecision>(prompt, Some(wait))
+            .await
+        {
+            Ok(Some(decision)) if decision.confirm => Confirmation::Accepted,
+            Err(ElicitationError::CapabilityNotSupported) => Confirmation::Unsupported,
+            // Declined, cancelled, timed out or malformed: never send.
+            _ => Confirmation::Declined,
+        }
+    }
+}
+
+/// The send pipeline's view of Outlook: each step is one short call on the COM worker.
+struct BridgePort<'a>(&'a OutlookMcp);
+
+fn parse_prepared(value: &serde_json::Value) -> Result<Prepared, String> {
+    let entry_id = value["entry_id"]
+        .as_str()
+        .ok_or("missing draft id")?
+        .to_string();
+    let preview: Preview =
+        serde_json::from_value(value["preview"].clone()).map_err(|e| e.to_string())?;
+    Ok(Prepared {
+        draft: DraftRef {
+            entry_id,
+            store_id: None,
+        },
+        preview,
+    })
+}
+
+impl MailPort for BridgePort<'_> {
+    async fn prepare(&self, request: PrepareRequest) -> Result<Prepared, String> {
+        parse_prepared(
+            &self
+                .0
+                .raw_call(MailCommand::ComposePrepare(request))
+                .await?,
+        )
+    }
+
+    async fn inspect(&self, draft: &DraftRef) -> Result<Prepared, String> {
+        parse_prepared(
+            &self
+                .0
+                .raw_call(MailCommand::ComposeInspect(draft.clone()))
+                .await?,
+        )
+    }
+
+    async fn send(&self, draft: &DraftRef, preview: &Preview) -> Result<(), PortError> {
+        let command = MailCommand::ComposeSend {
+            draft: draft.clone(),
+            preview: preview.clone(),
+        };
+        match self.0.raw_call(command).await {
+            Ok(_) => Ok(()),
+            Err(text) => {
+                if let Some(why) = text.strip_prefix(NOT_SENT) {
+                    Err(PortError::NotSent(why.to_string()))
+                } else if text.starts_with("permission denied") {
+                    Err(PortError::NotSent(text))
+                } else if let Some(why) = text.strip_prefix(UNKNOWN_OUTCOME) {
+                    Err(PortError::Unknown(why.to_string()))
+                } else {
+                    // Anything else after dispatch is treated as unknown, never as a clean failure.
+                    Err(PortError::Unknown(text))
+                }
+            }
+        }
+    }
+
+    async fn locate(&self, send_id: &str) -> Result<Location, String> {
+        let value = self
+            .0
+            .raw_call(MailCommand::ComposeLocate(send_id.to_string()))
+            .await?;
+        Ok(match value["location"].as_str() {
+            Some("sent") => Location::Sent,
+            Some("queued") => Location::Queued,
+            Some("drafts") => Location::Drafts,
+            _ => Location::Unknown,
+        })
+    }
+}
+
+fn outcome_result(outcome: Outcome) -> CallToolResult {
+    let content = vec![ContentBlock::text(outcome.value.to_string())];
+    if outcome.error {
+        CallToolResult::error(content)
+    } else {
+        CallToolResult::success(content)
+    }
+}
+
+fn text_error(message: impl Into<String>) -> CallToolResult {
+    CallToolResult::error(vec![ContentBlock::text(message.into())])
+}
+
+/// Sending needs `send`. Without it, `draft` still allows saving the message
+/// for the user to send from Outlook; otherwise nothing is allowed.
+pub fn delivery_for(policy: &Policy, save_only: bool) -> Result<Delivery, String> {
+    if !save_only && policy.allows(Capability::Send) {
+        return Ok(Delivery::Send);
+    }
+    if policy.allows(Capability::Draft) {
+        return Ok(Delivery::SaveOnly);
+    }
+    policy
+        .check(if save_only {
+            Capability::Draft
+        } else {
+            Capability::Send
+        })
+        .map(|_| Delivery::SaveOnly)
 }
 
 impl OutlookMcp {
@@ -64,24 +209,44 @@ impl OutlookMcp {
     }
 
     pub fn with_policy(policy: Policy) -> Self {
+        Self::with_settings(policy, SendSettings::default())
+    }
+
+    pub fn with_settings(policy: Policy, send_settings: SendSettings) -> Self {
         Self {
             bridge: Arc::new(OutlookBridge::start()),
             policy,
+            send_settings,
+            ledger: Arc::default(),
+        }
+    }
+
+    fn engine(&self, peer: Peer<RoleServer>) -> Engine<BridgePort<'_>, ElicitConfirmer> {
+        Engine::with_ledger(
+            BridgePort(self),
+            ElicitConfirmer { peer },
+            self.send_settings.clone(),
+            Arc::clone(&self.ledger),
+        )
+    }
+
+    /// Policy check, then one request on the COM worker. Errors are plain text.
+    async fn raw_call(&self, cmd: MailCommand) -> Result<serde_json::Value, String> {
+        // Server-side gate: nothing the model sends can change the policy.
+        self.policy.check(cmd.capability())?;
+        let bridge = Arc::clone(&self.bridge);
+        // COM/Windows calls must NEVER run directly on the async MCP executor.
+        match tokio::task::spawn_blocking(move || bridge.execute(cmd)).await {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) => Err(error.to_string()),
+            Err(error) => Err(format!("Outlook worker task failed: {error}")),
         }
     }
 
     async fn call(&self, cmd: MailCommand) -> CallToolResult {
-        // Server-side gate: nothing the model sends can change the policy.
-        if let Err(message) = self.policy.check(cmd.capability()) {
-            return CallToolResult::error(vec![ContentBlock::text(message)]);
-        }
-        let bridge = Arc::clone(&self.bridge);
-        // COM/Windows calls must NEVER run directly on the async MCP executor.
-        let result = tokio::task::spawn_blocking(move || bridge.execute(cmd)).await;
-        match result {
-            Ok(Ok(value)) => CallToolResult::success(vec![ContentBlock::text(value.to_string())]),
-            Ok(Err(error)) => {
-                let text = error.to_string();
+        match self.raw_call(cmd).await {
+            Ok(value) => CallToolResult::success(vec![ContentBlock::text(value.to_string())]),
+            Err(text) => {
                 match text.strip_prefix(UNKNOWN_OUTCOME) {
                     // A write may or may not have happened; never present it as a plain failure.
                     Some(detail) => CallToolResult::error(vec![ContentBlock::text(
@@ -95,9 +260,6 @@ impl OutlookMcp {
                     None => CallToolResult::error(vec![ContentBlock::text(text)]),
                 }
             }
-            Err(error) => CallToolResult::error(vec![ContentBlock::text(format!(
-                "Outlook worker task failed: {error}"
-            ))]),
         }
     }
 }
@@ -113,10 +275,15 @@ impl OutlookMcp {
     #[tool(
         description = "Return the Rust server stage and capability flags; does not check the connected Outlook session."
     )]
-    fn outlook_rust_status(&self) -> String {
+    fn outlook_rust_status(&self, peer: Peer<RoleServer>) -> String {
         let mut status = serde_json::to_value(foundation_status())
             .expect("serialization of static fields cannot fail");
         status["permission_mode"] = serde_json::json!(self.policy.describe());
+        // Without this the host cannot show send confirmations; sends then save drafts.
+        status["client_supports_elicitation"] = serde_json::json!(
+            peer.supported_elicitation_modes()
+                .contains(&rmcp::service::ElicitationMode::Form)
+        );
         status.to_string()
     }
 
@@ -311,6 +478,132 @@ impl OutlookMcp {
         self.call(MailCommand::MoveMail(params)).await
     }
 
+    #[tool(
+        description = "Compose a plain-text email and send it ONLY after the user approves a preview shown by their client (recipients, subject, body). With save_only, or when the server is not in full mode, it saves to Drafts and says so; check `sent` in the result. Attachments and HTML are not supported yet. Limits (many recipients, many sends per hour) trigger an extra user prompt.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn outlook_send_mail(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<SendMailParams>,
+    ) -> CallToolResult {
+        let request = match prepare_send_mail(&params) {
+            Ok(request) => request,
+            Err(error) => return text_error(error),
+        };
+        let delivery = match delivery_for(&self.policy, params.save_only.unwrap_or(false)) {
+            Ok(delivery) => delivery,
+            Err(error) => return text_error(error),
+        };
+        outcome_result(self.engine(peer).submit(request, delivery).await)
+    }
+
+    #[tool(
+        description = "Reply to a message (reply_all optional) in plain text and send it ONLY after the user approves a preview. Otherwise saves to Drafts; check `sent` in the result.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn outlook_reply_mail(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<ReplyMailParams>,
+    ) -> CallToolResult {
+        let request = match prepare_reply_mail(&params) {
+            Ok(request) => request,
+            Err(error) => return text_error(error),
+        };
+        let delivery = match delivery_for(&self.policy, false) {
+            Ok(delivery) => delivery,
+            Err(error) => return text_error(error),
+        };
+        outcome_result(self.engine(peer).submit(request, delivery).await)
+    }
+
+    #[tool(
+        description = "Forward a message to new recipients in plain text and send it ONLY after the user approves a preview that notes existing content is leaving the mailbox. Otherwise saves to Drafts; check `sent` in the result.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn outlook_forward_mail(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<ForwardMailParams>,
+    ) -> CallToolResult {
+        let request = match prepare_forward_mail(&params) {
+            Ok(request) => request,
+            Err(error) => return text_error(error),
+        };
+        let delivery = match delivery_for(&self.policy, false) {
+            Ok(delivery) => delivery,
+            Err(error) => return text_error(error),
+        };
+        outcome_result(self.engine(peer).submit(request, delivery).await)
+    }
+
+    #[tool(
+        description = "Send a draft this server saved earlier (use the entry_id it returned), after the user approves a preview. Requires send permission (server mode full). A draft already sent, or one with an unknown outcome, is refused.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn outlook_send_draft(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<SendDraftParams>,
+    ) -> CallToolResult {
+        if let Err(error) = self.policy.check(Capability::Send) {
+            return text_error(error);
+        }
+        if params.entry_id.is_empty() || params.entry_id.len() > 4096 {
+            return text_error("invalid EntryID");
+        }
+        let draft = DraftRef {
+            entry_id: params.entry_id,
+            store_id: params.store_id,
+        };
+        outcome_result(self.engine(peer).send_draft(draft).await)
+    }
+
+    #[tool(
+        description = "After a send reported unknown_outcome (or to confirm one), look for the message by its send_id in Sent Items, Outbox and Drafts. Read-only. Never retry a send before checking.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_check_send(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<CheckSendParams>,
+    ) -> CallToolResult {
+        if let Err(error) = self
+            .policy
+            .check(Capability::Read)
+            .and(checked_send_id(&params.send_id))
+        {
+            return text_error(error);
+        }
+        outcome_result(self.engine(peer).check(&params.send_id).await)
+    }
+
     #[tool(description = "List the profile's color categories (name and Outlook color index).")]
     async fn outlook_list_categories(&self) -> CallToolResult {
         self.call(MailCommand::ListCategories).await
@@ -380,19 +673,34 @@ mod tests {
     }
 
     #[test]
-    fn default_server_is_read_only_and_reports_its_mode() {
-        let server = OutlookMcp::default();
-        assert_eq!(server.policy.mode(), policy::Mode::ReadOnly);
-        let status: serde_json::Value =
-            serde_json::from_str(&server.outlook_rust_status()).unwrap();
-        assert_eq!(status["permission_mode"], "read-only");
+    fn delivery_follows_the_permission_mode() {
+        let policy = |mode: &str| Policy::from_settings(Some(mode), None).unwrap();
+        assert_eq!(delivery_for(&policy("full"), false), Ok(Delivery::Send));
+        assert_eq!(delivery_for(&policy("full"), true), Ok(Delivery::SaveOnly));
+        // Draft mode never sends, it saves for the user to send from Outlook.
+        assert_eq!(
+            delivery_for(&policy("draft"), false),
+            Ok(Delivery::SaveOnly)
+        );
+        assert!(delivery_for(&policy("read-only"), false).is_err());
+        assert!(delivery_for(&policy("read-only"), true).is_err());
+        let no_send = Policy::from_settings(Some("full"), Some("send")).unwrap();
+        // Send denied but drafts allowed: the message is saved, never sent.
+        assert_eq!(delivery_for(&no_send, false), Ok(Delivery::SaveOnly));
     }
 
     #[test]
-    fn registered_tools_include_only_the_gated_modify_writes() {
+    fn default_server_is_read_only_and_reports_its_mode() {
+        let server = OutlookMcp::default();
+        assert_eq!(server.policy.mode(), policy::Mode::ReadOnly);
+        assert_eq!(server.policy.describe(), "read-only");
+    }
+
+    #[test]
+    fn registered_tools_exclude_not_yet_implemented_destructive_writes() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 21);
+        assert_eq!(tools.len(), 26);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -415,10 +723,19 @@ mod tests {
             "outlook_set_category",
             "outlook_create_folder",
             "outlook_move_mail",
+            "outlook_send_mail",
+            "outlook_reply_mail",
+            "outlook_forward_mail",
+            "outlook_send_draft",
+            "outlook_check_send",
         ] {
             assert!(names.contains(&expected));
         }
-        for forbidden in ["outlook_send_mail", "outlook_delete_mail"] {
+        for forbidden in [
+            "outlook_delete_mail",
+            "outlook_delete_event",
+            "outlook_toggle_rule",
+        ] {
             assert!(!names.contains(&forbidden));
         }
     }

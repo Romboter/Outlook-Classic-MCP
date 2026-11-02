@@ -2,6 +2,7 @@
 //! side; JSON Schema is a usability hint, not an authorization boundary.
 use crate::localtime::LocalTime;
 use crate::policy::Capability;
+use crate::send::{DraftRef, PrepareRequest, Preview};
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -185,8 +186,190 @@ pub struct MoveMailParams {
     pub target_folder: String,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct SendMailParams {
+    /// Recipient addresses or names Outlook can resolve.
+    pub to: Vec<String>,
+    pub subject: String,
+    /// Plain-text body.
+    pub body: String,
+    pub cc: Option<Vec<String>>,
+    pub bcc: Option<Vec<String>>,
+    /// HTML bodies are not supported yet; must be false or omitted.
+    pub html: Option<bool>,
+    /// Attachments are not supported yet; must be empty or omitted.
+    pub attachments: Option<Vec<String>>,
+    /// low, normal (default) or high.
+    pub importance: Option<String>,
+    /// Only save to Drafts; never send.
+    pub save_only: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ReplyMailParams {
+    /// Short handle from list/search, or a raw Outlook EntryID.
+    pub entry_id: String,
+    pub store_id: Option<String>,
+    /// Plain-text reply, placed above the quoted original.
+    pub body: String,
+    /// Reply to everyone (default false).
+    pub reply_all: Option<bool>,
+    pub html: Option<bool>,
+    pub attachments: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ForwardMailParams {
+    /// Short handle from list/search, or a raw Outlook EntryID.
+    pub entry_id: String,
+    pub store_id: Option<String>,
+    pub to: Vec<String>,
+    pub cc: Option<Vec<String>>,
+    /// Optional plain-text note above the forwarded message.
+    pub body: Option<String>,
+    pub html: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct SendDraftParams {
+    /// Handle of a draft this server saved (the entry_id it returned).
+    pub entry_id: String,
+    pub store_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CheckSendParams {
+    /// The send_id returned by a send, save or unknown_outcome result.
+    pub send_id: String,
+}
+
+fn checked_addresses(list: &[String], what: &str) -> Result<(), String> {
+    if list.len() > 500 {
+        return Err(format!("{what} has too many entries"));
+    }
+    for entry in list {
+        if entry.trim().is_empty()
+            || entry.chars().count() > 320
+            || entry.chars().any(|c| c.is_control() || c == ';')
+        {
+            return Err(format!("{what} contains an invalid entry"));
+        }
+    }
+    Ok(())
+}
+
+fn unsupported_html_attachments(
+    html: Option<bool>,
+    attachments: Option<&Vec<String>>,
+) -> Result<(), String> {
+    if html == Some(true) {
+        return Err("HTML bodies are not supported yet; send plain text".into());
+    }
+    if attachments.is_some_and(|a| !a.is_empty()) {
+        return Err("attachments are not supported yet".into());
+    }
+    Ok(())
+}
+
+fn checked_body(body: &str) -> Result<(), String> {
+    if body.chars().count() > 100_000 {
+        return Err("body must be at most 100000 characters".into());
+    }
+    Ok(())
+}
+
+pub fn prepare_send_mail(x: &SendMailParams) -> Result<PrepareRequest, String> {
+    unsupported_html_attachments(x.html, x.attachments.as_ref())?;
+    if x.to.is_empty() {
+        return Err("at least one recipient is required".into());
+    }
+    let (cc, bcc) = (
+        x.cc.clone().unwrap_or_default(),
+        x.bcc.clone().unwrap_or_default(),
+    );
+    for (list, what) in [(&x.to, "to"), (&cc, "cc"), (&bcc, "bcc")] {
+        checked_addresses(list, what)?;
+    }
+    if x.subject.chars().count() > 255 || x.subject.chars().any(char::is_control) {
+        return Err("subject must be at most 255 characters on one line".into());
+    }
+    checked_body(&x.body)?;
+    let importance = x
+        .importance
+        .clone()
+        .unwrap_or_else(|| "normal".into())
+        .to_ascii_lowercase();
+    if !matches!(importance.as_str(), "low" | "normal" | "high") {
+        return Err("importance must be low, normal or high".into());
+    }
+    Ok(PrepareRequest::New {
+        to: x.to.clone(),
+        cc,
+        bcc,
+        subject: x.subject.clone(),
+        body: x.body.clone(),
+        importance,
+    })
+}
+
+pub fn prepare_reply_mail(x: &ReplyMailParams) -> Result<PrepareRequest, String> {
+    unsupported_html_attachments(x.html, x.attachments.as_ref())?;
+    checked_id(&x.entry_id, x.store_id.as_deref())?;
+    checked_body(&x.body)?;
+    Ok(PrepareRequest::Reply {
+        draft_of: DraftRef {
+            entry_id: x.entry_id.clone(),
+            store_id: x.store_id.clone(),
+        },
+        body: x.body.clone(),
+        reply_all: x.reply_all.unwrap_or(false),
+    })
+}
+
+pub fn prepare_forward_mail(x: &ForwardMailParams) -> Result<PrepareRequest, String> {
+    unsupported_html_attachments(x.html, None)?;
+    checked_id(&x.entry_id, x.store_id.as_deref())?;
+    if x.to.is_empty() {
+        return Err("at least one recipient is required".into());
+    }
+    let cc = x.cc.clone().unwrap_or_default();
+    checked_addresses(&x.to, "to")?;
+    checked_addresses(&cc, "cc")?;
+    let body = x.body.clone().unwrap_or_default();
+    checked_body(&body)?;
+    Ok(PrepareRequest::Forward {
+        draft_of: DraftRef {
+            entry_id: x.entry_id.clone(),
+            store_id: x.store_id.clone(),
+        },
+        to: x.to.clone(),
+        cc,
+        body,
+    })
+}
+
+pub fn checked_send_id(send_id: &str) -> Result<(), String> {
+    if send_id.is_empty()
+        || send_id.len() > 80
+        || !send_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err("invalid send_id".into());
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub enum MailCommand {
+    /// Send pipeline steps on the Outlook worker; the pipeline itself is in `crate::send`.
+    ComposePrepare(PrepareRequest),
+    ComposeInspect(DraftRef),
+    ComposeSend {
+        draft: DraftRef,
+        preview: Preview,
+    },
+    ComposeLocate(String),
     MarkMail(MarkMailParams),
     SetCategory(SetCategoryParams),
     CreateFolder(CreateFolderParams),
@@ -258,6 +441,9 @@ impl MailCommand {
             | MailCommand::SearchMails(_)
             | MailCommand::GetMail(_)
             | MailCommand::GetThread(_) => Capability::Read,
+            MailCommand::ComposeInspect(_) | MailCommand::ComposeLocate(_) => Capability::Read,
+            MailCommand::ComposePrepare(_) => Capability::Draft,
+            MailCommand::ComposeSend { .. } => Capability::Send,
             MailCommand::MarkMail(_)
             | MailCommand::SetCategory(_)
             | MailCommand::CreateFolder(_)
@@ -298,6 +484,10 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         | MailCommand::ListCategories
         | MailCommand::ListRules
         | MailCommand::GetOutOfOffice => Ok(()),
+        MailCommand::ComposePrepare(_)
+        | MailCommand::ComposeInspect(_)
+        | MailCommand::ComposeSend { .. } => Ok(()),
+        MailCommand::ComposeLocate(id) => checked_send_id(id),
         MailCommand::MarkMail(x) => {
             checked_id(&x.entry_id, x.store_id.as_deref())?;
             if x.read.is_none() && x.flagged.is_none() {
@@ -579,6 +769,90 @@ mod tests {
         assert!(validate_command(&moving("Inbox/Projects")).is_ok());
         for blocked in ["Deleted Items", " deleted ", "DELETED ITEMS"] {
             assert!(validate_command(&moving(blocked)).is_err(), "{blocked}");
+        }
+    }
+
+    #[test]
+    fn send_pipeline_commands_map_to_draft_and_send_capabilities() {
+        let draft = DraftRef {
+            entry_id: "m1".into(),
+            store_id: None,
+        };
+        assert_eq!(
+            MailCommand::ComposeInspect(draft.clone()).capability(),
+            Capability::Read
+        );
+        assert_eq!(
+            MailCommand::ComposeLocate("a-1".into()).capability(),
+            Capability::Read
+        );
+        let spec = prepare_send_mail(&SendMailParams {
+            to: vec!["a@b.example".into()],
+            subject: "s".into(),
+            body: "b".into(),
+            cc: None,
+            bcc: None,
+            html: None,
+            attachments: None,
+            importance: None,
+            save_only: None,
+        })
+        .unwrap();
+        assert_eq!(
+            MailCommand::ComposePrepare(spec).capability(),
+            Capability::Draft
+        );
+        let preview = Preview {
+            send_id: "x".into(),
+            sender: String::new(),
+            recipients: vec![],
+            subject: String::new(),
+            body_excerpt: String::new(),
+            body_chars: 0,
+            hash: String::new(),
+            kind: "new".into(),
+        };
+        assert_eq!(
+            MailCommand::ComposeSend { draft, preview }.capability(),
+            Capability::Send
+        );
+    }
+
+    #[test]
+    fn send_inputs_reject_unsupported_and_malformed_values() {
+        let base = || SendMailParams {
+            to: vec!["a@b.example".into()],
+            subject: "Hi".into(),
+            body: "text".into(),
+            cc: None,
+            bcc: None,
+            html: None,
+            attachments: None,
+            importance: None,
+            save_only: None,
+        };
+        assert!(prepare_send_mail(&base()).is_ok());
+        let mut x = base();
+        x.html = Some(true);
+        assert!(prepare_send_mail(&x).is_err());
+        let mut x = base();
+        x.attachments = Some(vec!["C:/x.txt".into()]);
+        assert!(prepare_send_mail(&x).is_err());
+        let mut x = base();
+        x.to = vec![];
+        assert!(prepare_send_mail(&x).is_err());
+        let mut x = base();
+        x.to = vec!["a@b.example; evil@x.example".into()];
+        assert!(prepare_send_mail(&x).is_err(), "separator smuggling");
+        let mut x = base();
+        x.subject = "line\nbreak".into();
+        assert!(prepare_send_mail(&x).is_err());
+        let mut x = base();
+        x.importance = Some("urgent".into());
+        assert!(prepare_send_mail(&x).is_err());
+        assert!(checked_send_id("abc-123").is_ok());
+        for bad in ["", "a b", "x'; DROP", &"x".repeat(81)] {
+            assert!(checked_send_id(bad).is_err(), "{bad}");
         }
     }
 

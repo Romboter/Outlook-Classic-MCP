@@ -2,7 +2,7 @@
 //!
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
-use super::{MailCommand, directory, indexed, modify, schedule, table, win};
+use super::{MailCommand, compose, directory, indexed, modify, schedule, table, win};
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
 };
@@ -418,6 +418,29 @@ impl win::Session {
                 let recipient = win::object_property(&self.namespace, "CurrentUser")?;
                 Ok(json!({"current_user": win::string_property(&recipient, "Name")?}))
             }
+            MailCommand::ComposePrepare(request) => {
+                let this = &*self;
+                compose::prepare(&this._application, &this.namespace, request, |d| {
+                    let (entry_id, store_id) = this.resolve_ids(&d.entry_id, &d.store_id)?;
+                    Ok(crate::send::DraftRef { entry_id, store_id })
+                })
+            }
+            MailCommand::ComposeInspect(draft) => {
+                let (entry_id, store_id) = self.resolve_ids(&draft.entry_id, &draft.store_id)?;
+                compose::inspect(
+                    &self.namespace,
+                    &crate::send::DraftRef { entry_id, store_id },
+                )
+            }
+            MailCommand::ComposeSend { draft, preview } => {
+                let (entry_id, store_id) = self.resolve_ids(&draft.entry_id, &draft.store_id)?;
+                compose::send(
+                    &self.namespace,
+                    &crate::send::DraftRef { entry_id, store_id },
+                    &preview,
+                )
+            }
+            MailCommand::ComposeLocate(send_id) => compose::locate(&self.namespace, &send_id),
             MailCommand::MarkMail(mut params) => {
                 (params.entry_id, params.store_id) =
                     self.resolve_ids(&params.entry_id, &params.store_id)?;

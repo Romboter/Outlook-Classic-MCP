@@ -1,6 +1,6 @@
 # Send workflow design (issues #8 and #9)
 
-**Status: proposal for review. Nothing in this document is implemented.** It defines how send, reply, forward and meeting invitations will work in the Rust server before any of them is registered. It builds on the permission modes, request tickets and `unknown_outcome` handling already in draft PR #25.
+**Status: the first version below (plain-text send, reply, forward, send-draft and check-send) is implemented in the send-pipeline PR; meeting invitations, attachments and HTML are not.** Where the code differs from this text, the code and `docs/TOOLS.md` win. It builds on the permission modes, request tickets and `unknown_outcome` handling in draft PR #25.
 
 ## What must be prevented
 
@@ -51,17 +51,21 @@ Every limit below is a threshold that triggers an **extra human prompt** (same h
 | Sends per hour (`OUTLOOK_MCP_SEND_PER_HOUR`) | 5 | Prompt: "5 sends already this hour; allow up to 5 more?" Approval raises the allowance for that hour in steps of the base limit |
 | Domain allowlist (`OUTLOOK_MCP_SEND_ALLOW_DOMAINS`, optional) | unset | Recipients outside it are listed in a prompt ("not on your usual list: ..."). When unset, external recipients are only flagged in the normal preview |
 
-- Each message still gets its own preview and confirmation. A raise prompt is in addition, and several thresholds crossed at once are combined into one prompt that names each.
+- Each message gets one prompt: the normal preview, plus an "outside the usual limits" section naming every threshold crossed. The hourly raise is that same approval, not a separate dialog.
 - Approval applies to that message or that hour only. Nothing is remembered across server restarts, and no approval changes the settings above.
 - **Hard ceilings** exist only to stop runaways and cannot be approved past: `OUTLOOK_MCP_SEND_HARD_MAX_RECIPIENTS` (default 200) and `OUTLOOK_MCP_SEND_HARD_MAX_PER_HOUR` (default 25). Hitting one refuses the send and says to change the server setting.
 - A user who wants a true wall instead of a prompt can set `OUTLOOK_MCP_SEND_STRICT=1`, which turns the thresholds above into refusals.
 - Reply keeps the original thread recipients; forward always flags that content from an existing message is leaving the mailbox.
 
+## What the client documents about elicitation
+
+Per the Claude Code MCP documentation (checked, not tested against this client): Claude Code declares `elicitation` with form and URL modes to stdio servers from v2.1.287; the human answers a dialog. **A user-configured `Elicitation` hook can auto-answer these requests**, so approval is only as human as the user's settings: anyone who can edit those settings can approve sends without a person. Local Desktop Code tab support is not clearly documented. `outlook_rust_status` reports `client_supports_elicitation` so this can be checked on the real client, and an unsupported client means sends save drafts.
+
 ## Confirmation without elicitation
 
-If the client does not advertise elicitation, sends are refused and the message is saved as a draft. A user who accepts the trade-off can set `OUTLOOK_MCP_SEND_CONFIRM=host`, which relies on the host's own per-tool permission prompt. That is weaker (an allowlisted tool sends with no prompt), so it is opt-in and reported in `outlook_rust_status`. `outlook_rust_status` also gains `client_supports_elicitation`.
+If the client does not advertise elicitation, nothing is sent and the message is saved as a draft with `reason: client_cannot_confirm`. The proposed `OUTLOOK_MCP_SEND_CONFIRM=host` option was **not built**: relying on a per-tool permission prompt is weaker (an allowlisted tool would send with no prompt).
 
-Enabling elicitation turns on an `rmcp` feature that pulls in the `url` crate and its dependencies; this would be the first change to `Cargo.lock` since the foundation PR and needs review.
+Enabling the `rmcp` `elicitation` feature added about 280 lines to `Cargo.lock` (the `url` crate with its `idna` and `icu_*` stack, among others). Review it with the PR.
 
 ## Out of scope for the first version
 

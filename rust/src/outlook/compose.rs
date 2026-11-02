@@ -27,7 +27,7 @@ const SMTP_PROPTAG: &str = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E
 const EXCERPT_CHARS: usize = 600;
 const MAX_RECIPIENTS: i32 = 500;
 
-fn fnv1a(text: &str) -> String {
+pub(super) fn fnv1a(text: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in text.bytes() {
         hash ^= u64::from(byte);
@@ -36,7 +36,7 @@ fn fnv1a(text: &str) -> String {
     format!("{hash:016x}")
 }
 
-fn new_send_id() -> String {
+pub(super) fn new_id() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -270,7 +270,7 @@ pub(super) fn prepare(
         bail!("one or more recipients could not be resolved to a mailbox; nothing was saved");
     }
 
-    let send_id = new_send_id();
+    let send_id = new_id();
     let props = win::object_property(&item, "UserProperties")?;
     let stamp = win::method_object(
         &props,

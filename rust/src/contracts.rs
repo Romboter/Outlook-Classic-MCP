@@ -1,5 +1,6 @@
 //! Read-only MCP request contracts. Values are validated again on the server
 //! side; JSON Schema is a usability hint, not an authorization boundary.
+use crate::action::{ActionKind, ActionPreview, ActionTarget};
 use crate::localtime::LocalTime;
 use crate::policy::Capability;
 use crate::send::{DraftRef, PrepareRequest, Preview};
@@ -532,8 +533,40 @@ pub fn validate_update_event(x: &UpdateEventParams) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct DeleteItemParams {
+    /// Short handle from list/search, or a raw Outlook EntryID.
+    pub entry_id: String,
+    pub store_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CheckActionParams {
+    /// The action_id returned by a delete result.
+    pub action_id: String,
+}
+
+pub fn prepare_delete(x: &DeleteItemParams, kind: ActionKind) -> Result<ActionTarget, String> {
+    checked_id(&x.entry_id, x.store_id.as_deref())?;
+    Ok(ActionTarget {
+        kind,
+        entry_id: x.entry_id.clone(),
+        store_id: x.store_id.clone(),
+    })
+}
+
 #[derive(Debug, Clone)]
 pub enum MailCommand {
+    /// Confirmed-action steps on the Outlook worker; the engine is in `crate::action`.
+    ActionPrepare(ActionTarget),
+    ActionExecute {
+        target: ActionTarget,
+        preview: ActionPreview,
+    },
+    ActionLocate {
+        action_id: String,
+        target: Option<ActionTarget>,
+    },
     CreateTask(CreateTaskParams),
     CompleteTask(CompleteTaskParams),
     CreateEvent(CreateEventParams),
@@ -617,7 +650,10 @@ impl MailCommand {
             | MailCommand::SearchMails(_)
             | MailCommand::GetMail(_)
             | MailCommand::GetThread(_) => Capability::Read,
-            MailCommand::ComposeInspect(_) | MailCommand::ComposeLocate(_) => Capability::Read,
+            MailCommand::ComposeInspect(_)
+            | MailCommand::ComposeLocate(_)
+            | MailCommand::ActionLocate { .. } => Capability::Read,
+            MailCommand::ActionPrepare(_) | MailCommand::ActionExecute { .. } => Capability::Delete,
             MailCommand::ComposePrepare(_) => Capability::Draft,
             MailCommand::ComposeSend { .. } => Capability::Send,
             MailCommand::CreateEvent(_) | MailCommand::UpdateEvent(_) => Capability::Events,
@@ -662,6 +698,8 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         | MailCommand::ListCategories
         | MailCommand::ListRules
         | MailCommand::GetOutOfOffice => Ok(()),
+        MailCommand::ActionPrepare(_) | MailCommand::ActionExecute { .. } => Ok(()),
+        MailCommand::ActionLocate { action_id, .. } => checked_send_id(action_id),
         MailCommand::ComposePrepare(_)
         | MailCommand::ComposeInspect(_)
         | MailCommand::ComposeSend { .. } => Ok(()),
@@ -1087,6 +1125,60 @@ mod tests {
         };
         assert!(validate_create_task(&task("", None)).is_err());
         assert!(validate_create_task(&task("ok", Some("urgent"))).is_err());
+    }
+
+    #[test]
+    fn delete_steps_need_the_delete_capability_and_locate_is_a_read() {
+        let target = prepare_delete(
+            &DeleteItemParams {
+                entry_id: "m1".into(),
+                store_id: None,
+            },
+            ActionKind::DeleteMail,
+        )
+        .unwrap();
+        assert_eq!(
+            MailCommand::ActionPrepare(target.clone()).capability(),
+            Capability::Delete
+        );
+        let preview = ActionPreview {
+            action_id: "a-1".into(),
+            summary: String::new(),
+            facts: vec![],
+            warnings: vec![],
+            hash: String::new(),
+        };
+        assert_eq!(
+            MailCommand::ActionExecute {
+                target: target.clone(),
+                preview
+            }
+            .capability(),
+            Capability::Delete
+        );
+        let locate = MailCommand::ActionLocate {
+            action_id: "a-1".into(),
+            target: Some(target),
+        };
+        assert_eq!(locate.capability(), Capability::Read);
+        assert!(validate_command(&locate).is_ok());
+        assert!(
+            validate_command(&MailCommand::ActionLocate {
+                action_id: "bad id!".into(),
+                target: None
+            })
+            .is_err()
+        );
+        assert!(
+            prepare_delete(
+                &DeleteItemParams {
+                    entry_id: "".into(),
+                    store_id: None
+                },
+                ActionKind::DeleteEvent
+            )
+            .is_err()
+        );
     }
 
     #[test]

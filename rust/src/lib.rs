@@ -3,6 +3,7 @@
 //! All mailbox operations execute on the dedicated Windows COM STA worker.
 //! Mutating tools exist only behind the server-side permission policy, and no
 //! Outlook data is logged to stderr.
+pub mod action;
 pub mod contracts;
 pub mod localtime;
 pub mod outlook;
@@ -12,14 +13,18 @@ pub mod send;
 pub mod thread_text;
 pub mod ticket;
 
+use action::{
+    ActionEngine, ActionKind, ActionLedger, ActionPort, ActionPreview, ActionSettings,
+    ActionTarget, Located, PreparedAction,
+};
 use contracts::{
-    CheckSendParams, CompleteTaskParams, CreateEventParams, CreateFolderParams, CreateTaskParams,
-    FolderParams, ForwardMailParams, GetContactParams, GetEventParams, GetMailParams,
-    ListContactsParams, ListEventsParams, ListMailsParams, ListTasksParams, MailCommand,
-    MarkMailParams, MoveMailParams, ReplyMailParams, ResolveNameParams, SearchContactsParams,
-    SearchMailsParams, SendDraftParams, SendMailParams, SetCategoryParams, ThreadParams,
-    UpdateEventParams, checked_send_id, prepare_forward_mail, prepare_reply_mail,
-    prepare_send_mail,
+    CheckActionParams, CheckSendParams, CompleteTaskParams, CreateEventParams, CreateFolderParams,
+    CreateTaskParams, DeleteItemParams, FolderParams, ForwardMailParams, GetContactParams,
+    GetEventParams, GetMailParams, ListContactsParams, ListEventsParams, ListMailsParams,
+    ListTasksParams, MailCommand, MarkMailParams, MoveMailParams, ReplyMailParams,
+    ResolveNameParams, SearchContactsParams, SearchMailsParams, SendDraftParams, SendMailParams,
+    SetCategoryParams, ThreadParams, UpdateEventParams, checked_send_id, prepare_delete,
+    prepare_forward_mail, prepare_reply_mail, prepare_send_mail,
 };
 use outlook::OutlookBridge;
 use policy::{Capability, Policy};
@@ -68,6 +73,8 @@ pub struct OutlookMcp {
     policy: Policy,
     send_settings: SendSettings,
     ledger: Arc<SendLedger>,
+    action_settings: ActionSettings,
+    action_ledger: Arc<ActionLedger>,
 }
 
 /// The form the host shows the human. Only a person at the host can fill it in.
@@ -100,6 +107,65 @@ impl Confirmer for ElicitConfirmer {
 
 /// The send pipeline's view of Outlook: each step is one short call on the COM worker.
 struct BridgePort<'a>(&'a OutlookMcp);
+
+/// The confirmed-action engine's view of Outlook.
+struct BridgeActionPort<'a>(&'a OutlookMcp);
+
+impl ActionPort for BridgeActionPort<'_> {
+    async fn prepare(&self, target: &ActionTarget) -> Result<PreparedAction, String> {
+        let value = self
+            .0
+            .raw_call(MailCommand::ActionPrepare(target.clone()))
+            .await?;
+        let preview: ActionPreview =
+            serde_json::from_value(value["preview"].clone()).map_err(|e| e.to_string())?;
+        Ok(PreparedAction {
+            target: target.clone(),
+            preview,
+        })
+    }
+
+    async fn execute(&self, prepared: &PreparedAction) -> Result<(), PortError> {
+        let command = MailCommand::ActionExecute {
+            target: prepared.target.clone(),
+            preview: prepared.preview.clone(),
+        };
+        match self.0.raw_call(command).await {
+            Ok(_) => Ok(()),
+            Err(text) => {
+                if let Some(why) = text.strip_prefix(NOT_SENT) {
+                    Err(PortError::NotSent(why.to_string()))
+                } else if text.starts_with("permission denied") {
+                    Err(PortError::NotSent(text))
+                } else if let Some(why) = text.strip_prefix(UNKNOWN_OUTCOME) {
+                    Err(PortError::Unknown(why.to_string()))
+                } else {
+                    // Anything else after dispatch is treated as unknown, never as a clean failure.
+                    Err(PortError::Unknown(text))
+                }
+            }
+        }
+    }
+
+    async fn locate(
+        &self,
+        action_id: &str,
+        target: Option<&ActionTarget>,
+    ) -> Result<Located, String> {
+        let value = self
+            .0
+            .raw_call(MailCommand::ActionLocate {
+                action_id: action_id.to_string(),
+                target: target.cloned(),
+            })
+            .await?;
+        Ok(match value["located"].as_str() {
+            Some("done") => Located::Done,
+            Some("not_done") => Located::NotDone,
+            _ => Located::Unknown,
+        })
+    }
+}
 
 fn parse_prepared(value: &serde_json::Value) -> Result<Prepared, String> {
     let entry_id = value["entry_id"]
@@ -219,7 +285,27 @@ impl OutlookMcp {
             policy,
             send_settings,
             ledger: Arc::default(),
+            action_settings: ActionSettings::default(),
+            action_ledger: Arc::default(),
         }
+    }
+
+    /// Replace the delete thresholds (they are prompts, with hard ceilings).
+    pub fn with_action_settings(mut self, action_settings: ActionSettings) -> Self {
+        self.action_settings = action_settings;
+        self
+    }
+
+    fn action_engine(
+        &self,
+        peer: Peer<RoleServer>,
+    ) -> ActionEngine<BridgeActionPort<'_>, ElicitConfirmer> {
+        ActionEngine::with_ledger(
+            BridgeActionPort(self),
+            ElicitConfirmer { peer },
+            self.action_settings.clone(),
+            Arc::clone(&self.action_ledger),
+        )
     }
 
     fn engine(&self, peer: Peer<RoleServer>) -> Engine<BridgePort<'_>, ElicitConfirmer> {
@@ -242,6 +328,22 @@ impl OutlookMcp {
             Ok(Err(error)) => Err(error.to_string()),
             Err(error) => Err(format!("Outlook worker task failed: {error}")),
         }
+    }
+
+    async fn confirmed_delete(
+        &self,
+        peer: Peer<RoleServer>,
+        params: DeleteItemParams,
+        kind: ActionKind,
+    ) -> CallToolResult {
+        if let Err(error) = self.policy.check(Capability::Delete) {
+            return text_error(error);
+        }
+        let target = match prepare_delete(&params, kind) {
+            Ok(target) => target,
+            Err(error) => return text_error(error),
+        };
+        outcome_result(self.action_engine(peer).run(target).await)
     }
 
     async fn call(&self, cmd: MailCommand) -> CallToolResult {
@@ -669,6 +771,66 @@ impl OutlookMcp {
         self.call(MailCommand::UpdateEvent(params)).await
     }
 
+    #[tool(
+        description = "Move ONE mail item to Deleted Items, only after the user approves a prompt showing its sender, subject, date and folder. Nothing is deleted if the client cannot show the prompt or the user declines. Items already in Deleted Items are refused (permanent deletion is never offered). Requires delete permission (server mode full). Check `done` in the result.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_delete_mail(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<DeleteItemParams>,
+    ) -> CallToolResult {
+        self.confirmed_delete(peer, params, ActionKind::DeleteMail)
+            .await
+    }
+
+    #[tool(
+        description = "Move ONE calendar event to Deleted Items, only after the user approves a prompt showing its subject, time and whether it is a whole series. Refused for meetings with attendees (they would not be told) and for items already in Deleted Items. Requires delete permission (server mode full). Check `done` in the result.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_delete_event(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<DeleteItemParams>,
+    ) -> CallToolResult {
+        self.confirmed_delete(peer, params, ActionKind::DeleteEvent)
+            .await
+    }
+
+    #[tool(
+        description = "After a delete reported unknown_outcome (or to confirm one), look for the item by its action_id: done, not_done or unknown. Read-only. Never try a delete again before checking.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_check_action(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<CheckActionParams>,
+    ) -> CallToolResult {
+        if let Err(error) = self
+            .policy
+            .check(Capability::Read)
+            .and(checked_send_id(&params.action_id))
+        {
+            return text_error(error);
+        }
+        outcome_result(self.action_engine(peer).check(&params.action_id).await)
+    }
+
     #[tool(description = "List the profile's color categories (name and Outlook color index).")]
     async fn outlook_list_categories(&self) -> CallToolResult {
         self.call(MailCommand::ListCategories).await
@@ -762,10 +924,10 @@ mod tests {
     }
 
     #[test]
-    fn registered_tools_exclude_not_yet_implemented_destructive_writes() {
+    fn registered_tools_exclude_not_yet_implemented_writes() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 30);
+        assert_eq!(tools.len(), 33);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -797,15 +959,13 @@ mod tests {
             "outlook_complete_task",
             "outlook_create_event",
             "outlook_update_event",
+            "outlook_delete_mail",
+            "outlook_delete_event",
+            "outlook_check_action",
         ] {
             assert!(names.contains(&expected));
         }
-        for forbidden in [
-            "outlook_delete_mail",
-            "outlook_delete_event",
-            "outlook_respond_event",
-            "outlook_toggle_rule",
-        ] {
+        for forbidden in ["outlook_respond_event", "outlook_toggle_rule"] {
             assert!(!names.contains(&forbidden));
         }
     }

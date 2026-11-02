@@ -10,6 +10,9 @@ use serde_json::Value;
 #[path = "outlook/compose.rs"]
 mod compose;
 #[cfg(windows)]
+#[path = "outlook/delete.rs"]
+mod delete;
+#[cfg(windows)]
 #[path = "outlook/directory.rs"]
 mod directory;
 #[cfg(windows)]

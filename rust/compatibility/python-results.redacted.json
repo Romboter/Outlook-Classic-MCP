@@ -1,7 +1,7 @@
 {
   "format": "outlook-python-source-result-contracts-v1",
   "source": "src/outlook_mcp/client/ and src/outlook_mcp/tools/",
-  "provenance": "Source-derived field inventory and synthetic redacted examples; NOT executed Outlook COM results, and NOT exhaustive/strict JSON Schemas. Conditional fields/branches may vary; verify on an isolated test mailbox.",
+  "provenance": "Source-derived Python result-key inventory and placeholder-only fixtures. An owner-reported 2026-11-02 interactive Outlook Classic test confirmed the listed 15 client-function result key shapes via OutlookBridge STA, not the FastMCP wrapper layer. No mailbox values are in this file; conditional and untested branches remain unverified.",
   "toolCount": 31,
   "tools": [
     {
@@ -16,7 +16,8 @@
         "status": "[REDACTED_STATUS]",
         "entry_id": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_create_event",
@@ -37,7 +38,8 @@
         "start": "[REDACTED]",
         "end": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_create_folder",
@@ -53,7 +55,8 @@
         "path": "[REDACTED]",
         "entry_id": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_create_task",
@@ -69,7 +72,8 @@
         "entry_id": "[REDACTED]",
         "subject": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_delete_event",
@@ -85,7 +89,8 @@
         "subject": "[REDACTED]",
         "entry_id": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_delete_mail",
@@ -101,7 +106,8 @@
         "subject": "[REDACTED]",
         "entry_id": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_forward_mail",
@@ -119,7 +125,8 @@
         "to": [],
         "subject": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_get_contact",
@@ -149,7 +156,13 @@
         "address": "[REDACTED]",
         "notes": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 14,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false
+      }
     },
     {
       "name": "outlook_get_event",
@@ -175,7 +188,7 @@
         "type",
         "response"
       ],
-      "notes": "itemKeys lists attendee keys",
+      "notes": "itemKeys refer to attendee elements; on client path: name/address strings, type/response integers.",
       "redactedFixture": {
         "entry_id": "[REDACTED]",
         "subject": "[REDACTED]",
@@ -191,7 +204,19 @@
         "reminder_minutes": 0,
         "categories": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 38,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false,
+        "itemTypes": {
+          "name": "string",
+          "address": "string",
+          "type": "integer",
+          "response": "integer"
+        }
+      }
     },
     {
       "name": "outlook_get_mail",
@@ -222,7 +247,7 @@
         "filename",
         "size_bytes"
       ],
-      "notes": "body/html_body and truncation fields are conditional; itemKeys lists attachment keys",
+      "notes": "HTML disabled in sample. Attachments were empty; attachment item keys are source-defined only, not verified against a real attachment.",
       "redactedFixture": {
         "entry_id": "[REDACTED]",
         "conversation_id": "[REDACTED]",
@@ -241,7 +266,20 @@
         "attachments": [],
         "body": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 27,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false,
+        "note": "html_body absent when not requested; attachments empty, so attachment item keys not verified"
+      },
+      "conditionalTopLevelKeys": [
+        "html_body",
+        "body_truncated",
+        "body_total_chars",
+        "body"
+      ]
     },
     {
       "name": "outlook_get_out_of_office",
@@ -252,13 +290,26 @@
         "note"
       ],
       "itemKeys": [],
-      "notes": "Shape varies by account/provider branch",
+      "notes": "Success branch has out_of_office bool and status string; note is present only in the error/unknown fallback according to source, not observed live.",
       "redactedFixture": {
         "out_of_office": false,
-        "status": "[REDACTED_STATUS]",
-        "note": "[REDACTED]"
+        "status": "[REDACTED_STATUS]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 81,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false,
+        "keyTypes": {
+          "out_of_office": "boolean",
+          "status": "string"
+        },
+        "note": "Known success branch omitted conditional note; exception fallback not tested"
+      },
+      "conditionalTopLevelKeys": [
+        "note"
+      ]
     },
     {
       "name": "outlook_list_categories",
@@ -275,7 +326,17 @@
         "count": 0,
         "items": []
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 74,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false,
+        "itemTypes": {
+          "color": "integer"
+        }
+      },
+      "notes": "Category item `color` was observed as integer in client result."
     },
     {
       "name": "outlook_list_contacts",
@@ -301,7 +362,13 @@
         "items": [],
         "has_more": false
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 5618,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false
+      }
     },
     {
       "name": "outlook_list_events",
@@ -329,7 +396,13 @@
         "count": 0,
         "items": []
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 101,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false
+      }
     },
     {
       "name": "outlook_list_folders",
@@ -345,12 +418,22 @@
         "unread_count",
         "default_item_type"
       ],
-      "notes": "Tool wrapper creates count/items around the client's list",
+      "notes": "Client list is bare 74-element list at max_depth=2, while FastMCP wrapper creates {count,items}; wrapper not exercised. item default_item_type observed integer.",
       "redactedFixture": {
         "count": 0,
         "items": []
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 1007,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false,
+        "itemTypes": {
+          "default_item_type": "integer"
+        },
+        "note": "The Python client returned a bare list of 74 folders at depth 2; the MCP wrapper's {count,items} envelope was not exercised"
+      }
     },
     {
       "name": "outlook_list_mails",
@@ -386,7 +469,17 @@
         "items": [],
         "has_more": false
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 95,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false,
+        "note": "next_offset was present when more results existed"
+      },
+      "conditionalTopLevelKeys": [
+        "next_offset"
+      ]
     },
     {
       "name": "outlook_list_rules",
@@ -404,7 +497,13 @@
         "count": 0,
         "items": []
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 775,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false
+      }
     },
     {
       "name": "outlook_list_tasks",
@@ -427,7 +526,13 @@
         "count": 0,
         "items": []
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 53,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false
+      }
     },
     {
       "name": "outlook_mark_mail",
@@ -445,7 +550,8 @@
         "unread": false,
         "flagged": false
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_move_mail",
@@ -461,7 +567,8 @@
         "new_entry_id": "[REDACTED]",
         "folder": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_reply_mail",
@@ -479,7 +586,8 @@
         "in_reply_to": "[REDACTED]",
         "subject": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_resolve_name",
@@ -492,14 +600,26 @@
         "smtp_address"
       ],
       "itemKeys": [],
-      "notes": "Resolved and unresolved results have different fields",
+      "notes": "Only successful resolution observed live; note appears on unresolved branch (unverified).",
       "redactedFixture": {
         "resolved": true,
         "query": "[REDACTED]",
         "display_name": "[REDACTED]",
         "smtp_address": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 18,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false,
+        "note": "resolved branch only; unresolved note field not tested"
+      },
+      "conditionalTopLevelKeys": [
+        "note",
+        "display_name",
+        "smtp_address"
+      ]
     },
     {
       "name": "outlook_respond_event",
@@ -513,7 +633,8 @@
         "status": "[REDACTED_STATUS]",
         "response": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_save_attachments",
@@ -531,7 +652,8 @@
         "files": [],
         "output_dir": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_search_contacts",
@@ -559,7 +681,14 @@
         "items": [],
         "searched_directory": false
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 5957,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false,
+        "note": "include_directory=false; GAL/directory item shape not exercised"
+      }
     },
     {
       "name": "outlook_search_mails",
@@ -591,7 +720,13 @@
         "count": 0,
         "items": []
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 2864,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false
+      }
     },
     {
       "name": "outlook_send_mail",
@@ -613,7 +748,8 @@
         "cc": [],
         "bcc": []
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_set_category",
@@ -631,7 +767,8 @@
         "subject": "[REDACTED]",
         "categories": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_toggle_rule",
@@ -647,7 +784,8 @@
         "rule": "[REDACTED]",
         "enabled": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_update_event",
@@ -661,7 +799,8 @@
         "status": "[REDACTED_STATUS]",
         "entry_id": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": false
     },
     {
       "name": "outlook_whoami",
@@ -673,8 +812,13 @@
         "timezone",
         "utc_offset"
       ],
-      "itemKeys": [],
-      "notes": "Account list item shapes need runtime confirmation",
+      "itemKeys": [
+        "display_name",
+        "smtp_address",
+        "user_name",
+        "account_type"
+      ],
+      "notes": "`accounts` elements verified on the OutlookBridge client path: display_name/smtp_address/user_name strings; account_type int. Wrapper not exercised.",
       "redactedFixture": {
         "current_user": "[REDACTED]",
         "accounts": [],
@@ -682,7 +826,36 @@
         "timezone": "[REDACTED]",
         "utc_offset": "[REDACTED]"
       },
-      "verifiedAgainstLiveOutlook": false
+      "verifiedAgainstLiveOutlook": false,
+      "clientResultKeysObservedLive": true,
+      "ownerReportedLive": {
+        "elapsed_ms": 16,
+        "status": "client_keys_match_source_inventory",
+        "toolWrapperExercised": false,
+        "itemTypes": {
+          "display_name": "string",
+          "smtp_address": "string",
+          "user_name": "string",
+          "account_type": "integer"
+        }
+      }
     }
-  ]
+  ],
+  "liveEvidence": {
+    "reportedDate": "2026-11-02",
+    "provider": "Owner-supplied redacted observation; not independently reproduced by this author",
+    "environment": "Interactive Windows Outlook Classic; Python virtual environment with mcp==1.29.0 and pywin32 outside the repository",
+    "execution": "Python client/* functions called through the real OutlookBridge STA thread, not FastMCP tool wrappers",
+    "toolCalls": 15,
+    "result": "All 15 read-only client calls completed without error; observed top-level and item keys matched inventory including conditional-field omissions",
+    "capture": "Only field names, field types, counts and elapsed milliseconds; no mailbox contents, addresses, EntryIDs, StoreIDs or message subjects",
+    "notExercised": [
+      "FastMCP response_format formatting",
+      "list_folders wrapper count/items envelope",
+      "ui_result structuredContent",
+      "16 mutating tools",
+      "Python thread retrieval (not implemented)"
+    ],
+    "speedInterpretation": "One observation per call, not a statistical benchmark; network/store variability expected"
+  }
 }

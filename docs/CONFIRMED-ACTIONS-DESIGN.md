@@ -1,6 +1,6 @@
 # Confirmed actions design: delete, respond, invite, rules, attachments (issues #8 and #9)
 
-**Status: proposal for review. Nothing here is implemented.** It covers the five Python tools still missing from the Rust server (`outlook_delete_mail`, `outlook_delete_event`, `outlook_respond_event`, `outlook_toggle_rule`, `outlook_save_attachments`) plus the two parts of calendar writes that were left out of draft PR #29: inviting attendees and changing meetings that have attendees. It reuses the pieces already built for sending in [SEND-DESIGN.md](SEND-DESIGN.md): server permission modes, MCP elicitation, the exactly-once ledger and `unknown_outcome` handling.
+**Status: approved by the owner (decisions below); implementation in progress, one tool per PR.** It covers the five Python tools still missing from the Rust server (`outlook_delete_mail`, `outlook_delete_event`, `outlook_respond_event`, `outlook_toggle_rule`, `outlook_save_attachments`) plus the two parts of calendar writes that were left out of draft PR #29: inviting attendees and changing meetings that have attendees. It reuses the pieces already built for sending in [SEND-DESIGN.md](SEND-DESIGN.md): server permission modes, MCP elicitation, the exactly-once ledger and `unknown_outcome` handling.
 
 ## The rule
 
@@ -28,7 +28,7 @@
 | `outlook_update_event` on a meeting | `send` | What changed, every attendee | Changes are applied and updates sent only on approval |
 | cancel meeting (new `outlook_cancel_meeting`) | `send` | Subject, time, every attendee | Marks the meeting cancelled and sends cancellations on approval, then soft-deletes it |
 | `outlook_toggle_rule` | `rules` | Rule name, current and new state, and what the rule does (deletes, moves, forwards, marks read) | A rule that deletes or forwards mail gets an extra warning line. Rules save immediately in Outlook, so there is no draft stage. Reads the state back |
-| `outlook_save_attachments` | `files` | Message sender and subject, each file name and size, the target folder | Folder must resolve inside the user profile (`safe_path`), names are validated, nothing is overwritten. Executable and script extensions (`.exe .dll .js .vbs .ps1 .bat .cmd .lnk .scr .msi` and similar) are refused outright, not prompted |
+| `outlook_save_attachments` | `files` | Message sender and subject, each file name and size, the target folder | Folder must resolve inside the user profile (`safe_path`), names are validated, nothing is overwritten. Executable and script extensions (`.exe .dll .js .vbs .ps1 .bat .cmd .lnk .scr .msi` and similar) are refused outright, not prompted; the refusal names the file and says why |
 
 Python behavior that is deliberately dropped: deleting meetings that have attendees without telling them, deleting from Deleted Items, saving executables, and replying "accept" without anyone seeing it.
 
@@ -93,11 +93,11 @@ Live tests use only items the owner has designated as test items (a throwaway me
 - That the stamp user property survives into Deleted Items and Sent Items for each item type (it did for sent mail).
 - Whether Outlook shows its own security or confirmation dialogs for any of these over COM, which would block the worker.
 
-## Decisions needed
+## Decisions (approved by the owner)
 
-1. Approve "no action without a person's approval, ever, in any mode", including that an unsupported client means the action simply does not happen.
-2. Soft delete only, with Deleted Items and meetings-with-attendees refused. Accept that permanent deletion is never offered.
-3. A new `outlook_cancel_meeting` tool, and `delete_event` refusing meetings with attendees.
-4. Refuse executable and script attachment extensions outright instead of prompting.
-5. Default thresholds: 10 deletes per hour, 10 responses per hour, 5 rule changes per hour (hard 50, 50, 20).
-6. Build order: delete, rules, respond, meetings, attachments.
+1. **Approved.** No action without a person's approval, ever, in any mode; an unsupported client means the action does not happen.
+2. **Approved.** Soft delete only; Deleted Items and meetings with attendees are refused; permanent deletion is never offered.
+3. **Approved.** New `outlook_cancel_meeting`; `delete_event` refuses meetings with attendees.
+4. **Approved with an amendment.** Executable and script attachment extensions are refused outright, **and the refusal says which file was refused and why** (for example: "invoice.exe was not saved: executable and script files can run code when opened"), so the user can decide what to do themselves. Nothing is saved for a refused file.
+5. **Approved on one condition:** every threshold stays a speed bump (a prompt), never a wall, with hard ceilings only as runaway protection: 10 deletes, 10 responses and 5 rule changes per hour (hard 50, 50, 20).
+6. **Approved.** Build order: delete, rules, respond, meetings, attachments.

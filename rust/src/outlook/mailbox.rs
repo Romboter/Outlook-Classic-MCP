@@ -2,7 +2,7 @@
 //!
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
-use super::{MailCommand, indexed, table, win};
+use super::{MailCommand, directory, indexed, table, win};
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
 };
@@ -17,7 +17,7 @@ use windows::{
     core::BSTR,
 };
 
-fn optional_text(object: &IDispatch, name: &str) -> String {
+pub(super) fn optional_text(object: &IDispatch, name: &str) -> String {
     win::string_property(object, name).unwrap_or_default()
 }
 
@@ -41,7 +41,7 @@ fn text_property(object: &IDispatch, name: &str) -> String {
         .unwrap_or_default()
 }
 
-fn bool_property(object: &IDispatch, name: &str) -> bool {
+pub(super) fn bool_property(object: &IDispatch, name: &str) -> bool {
     let Ok(value) = win::property(object, name) else {
         return false;
     };
@@ -401,6 +401,28 @@ impl win::Session {
                 let recipient = win::object_property(&self.namespace, "CurrentUser")?;
                 Ok(json!({"current_user": win::string_property(&recipient, "Name")?}))
             }
+            MailCommand::ListContacts(params) => directory::list_contacts(&self.namespace, params),
+            MailCommand::SearchContacts(params) => {
+                directory::search_contacts(&self.namespace, params)
+            }
+            MailCommand::GetContact(mut params) => {
+                // Contact handles share the mail handle table.
+                let mut shim = GetMailParams {
+                    entry_id: params.entry_id.clone(),
+                    store_id: params.store_id.clone(),
+                    include_body: None,
+                    include_html: None,
+                    max_body_chars: None,
+                };
+                self.refs.resolve_input(&mut shim)?;
+                params.entry_id = shim.entry_id;
+                params.store_id = shim.store_id;
+                directory::get_contact(&self.namespace, params)
+            }
+            MailCommand::ResolveName(params) => directory::resolve_name(&self.namespace, params),
+            MailCommand::ListCategories => directory::list_categories(&self.namespace),
+            MailCommand::ListRules => directory::list_rules(&self.namespace),
+            MailCommand::GetOutOfOffice => directory::get_out_of_office(&self.namespace),
             MailCommand::ListFolders(params) => list_folders(&self.namespace, params),
             MailCommand::ListMails(params) => list_mails(&self.namespace, params),
             MailCommand::SearchMails(params) if params.backend.as_deref() == Some("indexed") => {

@@ -79,14 +79,70 @@ pub struct ThreadParams {
     pub total_body_chars: Option<u32>,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ListContactsParams {
+    /// Number of contacts to return (default 10, maximum 30).
+    pub limit: Option<u32>,
+    /// Number of contacts to skip across all contact folders (default 0, maximum 5000).
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct SearchContactsParams {
+    /// Words that must all appear in name, email, company or job title (1..160 characters).
+    pub query: String,
+    /// Maximum result count (default 10, maximum 30).
+    pub limit: Option<u32>,
+    /// Also scan the Exchange Global Address List by display name (default true).
+    pub include_directory: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct GetContactParams {
+    /// Short handle from list/search contacts (e.g. m1), or a raw Outlook EntryID.
+    pub entry_id: String,
+    /// StoreID for raw identifiers in non-default stores.
+    pub store_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ResolveNameParams {
+    /// Display name or address to resolve against the address book (1..160 characters).
+    pub name: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum MailCommand {
     WhoAmI,
+    ListContacts(ListContactsParams),
+    SearchContacts(SearchContactsParams),
+    GetContact(GetContactParams),
+    ResolveName(ResolveNameParams),
+    ListCategories,
+    ListRules,
+    GetOutOfOffice,
     ListFolders(FolderParams),
     ListMails(ListMailsParams),
     SearchMails(SearchMailsParams),
     GetMail(GetMailParams),
     GetThread(ThreadParams),
+}
+
+/// Lowercased whitespace-separated query words (never empty for a non-blank query).
+pub fn query_words(query: &str) -> Vec<String> {
+    query.split_whitespace().map(str::to_lowercase).collect()
+}
+
+pub fn matches_all(haystack: &str, words: &[String]) -> bool {
+    let haystack = haystack.to_lowercase();
+    words.iter().all(|w| haystack.contains(w.as_str()))
+}
+
+fn checked_text(value: &str, what: &str) -> Result<(), String> {
+    if value.trim().is_empty() || value.chars().count() > 160 {
+        return Err(format!("{what} must contain 1..160 characters"));
+    }
+    Ok(())
 }
 
 pub fn checked_limit(input: Option<u32>) -> Result<usize, String> {
@@ -109,7 +165,33 @@ fn validate_backend(name: Option<&str>, allow_indexed: bool) -> Result<(), Strin
 
 pub fn validate_command(command: &MailCommand) -> Result<(), String> {
     match command {
-        MailCommand::WhoAmI => Ok(()),
+        MailCommand::WhoAmI
+        | MailCommand::ListCategories
+        | MailCommand::ListRules
+        | MailCommand::GetOutOfOffice => Ok(()),
+        MailCommand::ListContacts(x) => {
+            checked_limit(x.limit)?;
+            if x.offset.unwrap_or(0) > 5000 {
+                return Err("offset must be 0..5000".into());
+            }
+            Ok(())
+        }
+        MailCommand::SearchContacts(x) => {
+            checked_limit(x.limit)?;
+            checked_text(&x.query, "query")
+        }
+        MailCommand::GetContact(x) => {
+            if x.entry_id.is_empty()
+                || x.entry_id.len() > 4096
+                || x.store_id
+                    .as_ref()
+                    .is_some_and(|s| s.is_empty() || s.len() > 4096)
+            {
+                return Err("invalid contact EntryID/StoreID".into());
+            }
+            Ok(())
+        }
+        MailCommand::ResolveName(x) => checked_text(&x.name, "name"),
         MailCommand::ListFolders(x) => {
             if x.max_depth.unwrap_or(2) > 4 {
                 Err("max_depth must be between 0 and 4".into())
@@ -234,6 +316,50 @@ mod tests {
         let mut empty = params;
         empty.entry_id.clear();
         assert!(validate_command(&MailCommand::GetThread(empty)).is_err());
+    }
+
+    #[test]
+    fn validates_directory_commands() {
+        let search = |q: &str, limit| {
+            validate_command(&MailCommand::SearchContacts(SearchContactsParams {
+                query: q.into(),
+                limit,
+                include_directory: None,
+            }))
+        };
+        assert!(search("jane doe", None).is_ok());
+        assert!(search("   ", None).is_err());
+        assert!(search(&"x".repeat(161), None).is_err());
+        assert!(search("jane", Some(31)).is_err());
+        let list = |offset| {
+            validate_command(&MailCommand::ListContacts(ListContactsParams {
+                limit: None,
+                offset,
+            }))
+        };
+        assert!(list(Some(5000)).is_ok());
+        assert!(list(Some(5001)).is_err());
+        assert!(
+            validate_command(&MailCommand::ResolveName(ResolveNameParams {
+                name: "".into()
+            }))
+            .is_err()
+        );
+        assert!(
+            validate_command(&MailCommand::GetContact(GetContactParams {
+                entry_id: "".into(),
+                store_id: None
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn contact_words_match_case_insensitively_and_all_required() {
+        let words = query_words("  JANE   acme ");
+        assert_eq!(words, ["jane", "acme"]);
+        assert!(matches_all("Jane Doe jane@x.com ACME Corp", &words));
+        assert!(!matches_all("Jane Doe Initech", &words));
     }
 
     #[test]

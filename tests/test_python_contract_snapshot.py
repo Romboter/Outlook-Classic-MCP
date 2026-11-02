@@ -43,6 +43,9 @@ class PythonContractSnapshotTests(unittest.TestCase):
                 set(self.tools[name]["inputSchema"]["properties"]),
             )
 
+    def test_captured_runtime_metadata_is_not_lossy_unicode(self):
+        self.assertNotIn("\uFFFD", RUNTIME.read_text(encoding="utf-8"))
+        
     def test_static_schema_stays_in_sync_with_python_sources(self):
         self.assertEqual(compare_static(self.declarations), [])
 

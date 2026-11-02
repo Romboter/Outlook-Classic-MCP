@@ -4,9 +4,7 @@
 //! offset. Every call is bounded by a result limit, a scan cap and a deadline.
 use super::mailbox::{bool_property, default_folder, optional_text};
 use super::win;
-use crate::contracts::{
-    GetEventParams, ListEventsParams, ListTasksParams, MAX_EVENT_RANGE_DAYS, checked_limit_in,
-};
+use crate::contracts::{GetEventParams, ListEventsParams, ListTasksParams, checked_limit_in};
 use crate::localtime::LocalTime;
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -16,6 +14,7 @@ use windows::Win32::{
     System::{
         Com::{DISPATCH_METHOD, IDispatch},
         SystemInformation::GetLocalTime,
+        Time::{SystemTimeToTzSpecificLocalTime, TzSpecificLocalTimeToSystemTime},
         Variant::{VAR_CHANGE_FLAGS, VARIANT, VT_R8, VariantChangeType, VariantTimeToSystemTime},
     },
 };
@@ -28,7 +27,7 @@ const MAX_ITEMS_SCANNED: usize = 5000;
 const BUDGET: Duration = Duration::from_secs(30);
 const BODY_CHARS: usize = 4000;
 const PREVIEW_CHARS: usize = 200;
-const MAX_ATTENDEES: i32 = 100;
+const MAX_ATTENDEES: i32 = 500;
 /// Outlook reports "no date" as the year 4501.
 const NO_DATE_YEAR: u16 = 4500;
 
@@ -49,6 +48,60 @@ fn local_now() -> LocalTime {
     )
 }
 
+fn to_system_time(t: &LocalTime) -> SYSTEMTIME {
+    SYSTEMTIME {
+        wYear: t.year as u16,
+        wMonth: t.month as u16,
+        wDay: t.day as u16,
+        wHour: t.hour as u16,
+        wMinute: t.minute as u16,
+        wSecond: t.second as u16,
+        ..Default::default()
+    }
+}
+
+fn from_system_time(t: &SYSTEMTIME) -> LocalTime {
+    LocalTime::from_parts(
+        i32::from(t.wYear),
+        u32::from(t.wMonth),
+        u32::from(t.wDay),
+        u32::from(t.wHour),
+        u32::from(t.wMinute),
+        u32::from(t.wSecond),
+    )
+}
+
+/// Convert a UTC wall clock to this machine's local time.
+fn utc_to_local(utc: &LocalTime) -> Result<LocalTime> {
+    let (src, mut dst) = (to_system_time(utc), SYSTEMTIME::default());
+    // SAFETY: both SYSTEMTIMEs are live locals; None selects the current zone.
+    unsafe { SystemTimeToTzSpecificLocalTime(None, &src, &mut dst) }
+        .context("local time conversion failed")?;
+    Ok(from_system_time(&dst))
+}
+
+/// This machine's UTC offset (DST-correct) at a local wall-clock time, as
+/// `+HH:MM`. Empty when the zone cannot be resolved.
+fn offset_suffix(local: &LocalTime) -> String {
+    let (src, mut dst) = (to_system_time(local), SYSTEMTIME::default());
+    // SAFETY: both SYSTEMTIMEs are live locals; None selects the current zone.
+    if unsafe { TzSpecificLocalTimeToSystemTime(None, &src, &mut dst) }.is_err() {
+        return String::new();
+    }
+    let minutes = local.minutes() - from_system_time(&dst).minutes();
+    let sign = if minutes < 0 { '-' } else { '+' };
+    format!("{sign}{:02}:{:02}", minutes.abs() / 60, minutes.abs() % 60)
+}
+
+/// Bound given as local time or with an offset, resolved to local wall clock.
+fn resolve_bound(text: &str) -> Result<LocalTime> {
+    let (time, offset) = LocalTime::parse_with_offset(text).map_err(anyhow::Error::msg)?;
+    match offset {
+        None => Ok(time),
+        Some(minutes) => utc_to_local(&time.shift_minutes(-i64::from(minutes))),
+    }
+}
+
 /// A DATE property as local ISO-8601 text, or None when unset or unreadable.
 fn date_iso(object: &IDispatch, name: &str) -> Option<String> {
     let value = win::property(object, name).ok()?;
@@ -61,17 +114,8 @@ fn date_iso(object: &IDispatch, name: &str) -> Option<String> {
     if unsafe { VariantTimeToSystemTime(vtime, &mut st) } == 0 || st.wYear >= NO_DATE_YEAR {
         return None;
     }
-    Some(
-        LocalTime::from_parts(
-            i32::from(st.wYear),
-            u32::from(st.wMonth),
-            u32::from(st.wDay),
-            u32::from(st.wHour),
-            u32::from(st.wMinute),
-            u32::from(st.wSecond),
-        )
-        .iso(),
-    )
+    let local = from_system_time(&st);
+    Some(format!("{}{}", local.iso(), offset_suffix(&local)))
 }
 
 fn capped(text: String, max: usize) -> (String, bool) {
@@ -103,19 +147,16 @@ fn event_summary(event: &IDispatch, store_id: &str) -> Value {
 pub(super) fn list_events(namespace: &IDispatch, params: ListEventsParams) -> Result<Value> {
     let limit = checked_limit_in(params.limit, 50, 200).map_err(anyhow::Error::msg)?;
     let start = match params.start.as_deref() {
-        Some(text) => LocalTime::parse(text).map_err(anyhow::Error::msg)?,
+        Some(text) => resolve_bound(text)?,
         None => local_now(),
     };
     let end = match params.end.as_deref() {
-        Some(text) => LocalTime::parse(text).map_err(anyhow::Error::msg)?,
+        Some(text) => resolve_bound(text)?,
         None => start.add_days(14),
     };
     let minutes = end.minutes() - start.minutes();
     if minutes <= 0 {
         bail!("end must be after start");
-    }
-    if minutes > MAX_EVENT_RANGE_DAYS * 1440 {
-        bail!("date range may not exceed {MAX_EVENT_RANGE_DAYS} days");
     }
 
     let calendar = default_folder(namespace, OL_FOLDER_CALENDAR)?;
@@ -191,7 +232,8 @@ pub(super) fn get_event(namespace: &IDispatch, params: GetEventParams) -> Result
             }));
         }
     }
-    let (body, body_truncated) = capped(optional_text(&event, "Body"), BODY_CHARS);
+    let body_limit = params.max_body_chars.unwrap_or(BODY_CHARS as u32) as usize;
+    let (body, body_truncated) = capped(optional_text(&event, "Body"), body_limit);
     let object = data.as_object_mut().context("invalid event result")?;
     object.insert("body".into(), json!(body));
     object.insert("body_truncated".into(), json!(body_truncated));

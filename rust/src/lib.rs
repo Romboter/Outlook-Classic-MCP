@@ -164,7 +164,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Read one contact by handle from list/search (or raw EntryID). Notes are capped at 4000 characters (notes_truncated)."
+        description = "Read one contact by handle from list/search (or raw EntryID). Notes are capped at 4000 characters by default (max_notes_chars up to 50000; notes_truncated)."
     )]
     async fn outlook_get_contact(
         &self,
@@ -184,7 +184,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "List calendar events in a bounded local-time window (default now to +14 days, max 366 days; limit default 50, max 200). Recurring series are expanded by default. Times are local wall-clock ISO-8601 without an offset; pass local times, not UTC. entry_id is a short session handle."
+        description = "List calendar events in a bounded local-time window (default now to +14 days; limit default 50, max 200). Recurring series are expanded by default. Pass local ISO-8601 times or times with a UTC offset (converted to local); results carry the local offset. entry_id is a short session handle."
     )]
     async fn outlook_list_events(
         &self,
@@ -194,7 +194,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Read one calendar event by handle from list_events (or raw EntryID), including attendees. Body capped at 4000 characters (body_truncated)."
+        description = "Read one calendar event by handle from list_events (or raw EntryID), including attendees. Body capped at 4000 characters by default (max_body_chars up to 50000; body_truncated)."
     )]
     async fn outlook_get_event(
         &self,

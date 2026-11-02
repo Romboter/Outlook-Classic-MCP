@@ -50,6 +50,29 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
     (y, m, d)
 }
 
+/// `Z`, `+HH:MM`, `+HHMM` or `+HH` as minutes east of UTC.
+fn parse_offset(zone: &str) -> Option<i32> {
+    if zone.eq_ignore_ascii_case("z") {
+        return Some(0);
+    }
+    let sign = match zone.as_bytes().first()? {
+        b'+' => 1,
+        b'-' => -1,
+        _ => return None,
+    };
+    let rest = &zone[1..];
+    let (h, m) = match rest.len() {
+        2 => (digits(rest, 2, 2)?, 0),
+        4 if !rest.contains(':') => (digits(&rest[..2], 2, 2)?, digits(&rest[2..], 2, 2)?),
+        5 if rest.as_bytes()[2] == b':' => (digits(&rest[..2], 2, 2)?, digits(&rest[3..], 2, 2)?),
+        _ => return None,
+    };
+    if h > 14 || m > 59 {
+        return None;
+    }
+    Some(sign * (h * 60 + m) as i32)
+}
+
 fn digits(s: &str, min: usize, max: usize) -> Option<u32> {
     if !(min..=max).contains(&s.len()) || !s.bytes().all(|b| b.is_ascii_digit()) {
         return None;
@@ -58,13 +81,29 @@ fn digits(s: &str, min: usize, max: usize) -> Option<u32> {
 }
 
 impl LocalTime {
-    /// Accepts `YYYY-MM-DD`, optionally followed by `T` or a space and
-    /// `HH:MM[:SS[.fraction]]`. Offsets and `Z` are rejected.
+    /// Local wall-clock only: `YYYY-MM-DD`, optionally followed by `T` or a
+    /// space and `HH:MM[:SS[.fraction]]`. Offsets and `Z` are rejected.
     pub fn parse(input: &str) -> Result<Self, String> {
+        Self::parse_inner(input, false).map(|(time, _)| time)
+    }
+
+    /// Like `parse`, but a time may end in `Z` or a UTC offset (`+02:00`,
+    /// `-0500`, `+02`). Returns the offset in minutes east of UTC when present.
+    pub fn parse_with_offset(input: &str) -> Result<(Self, Option<i32>), String> {
+        Self::parse_inner(input, true)
+    }
+
+    fn parse_inner(input: &str, allow_offset: bool) -> Result<(Self, Option<i32>), String> {
         let bad = || {
-            format!(
-                "invalid datetime '{input}'. Use local ISO-8601 like 2026-04-25T14:30:00 (no time zone offset)"
-            )
+            if allow_offset {
+                format!(
+                    "invalid datetime '{input}'. Use ISO-8601 like 2026-04-25T14:30:00 or 2026-04-25T14:30:00+02:00"
+                )
+            } else {
+                format!(
+                    "invalid datetime '{input}'. Use local ISO-8601 like 2026-04-25T14:30:00 (no time zone offset)"
+                )
+            }
         };
         let text = input.trim();
         let (date, time) = match text.find(['T', ' ']) {
@@ -80,10 +119,20 @@ impl LocalTime {
         else {
             return Err(bad());
         };
-        let (mut hour, mut minute, mut second) = (0, 0, 0);
+        let (mut hour, mut minute, mut second, mut offset) = (0, 0, 0, None);
         if let Some(time) = time {
-            let time = time.split('.').next().unwrap_or("");
-            let mut t = time.split(':');
+            let (clock, zone) = match time.find(['Z', 'z', '+', '-']) {
+                Some(i) => (&time[..i], Some(&time[i..])),
+                None => (time, None),
+            };
+            if let Some(zone) = zone {
+                if !allow_offset {
+                    return Err(bad());
+                }
+                offset = Some(parse_offset(zone).ok_or_else(bad)?);
+            }
+            let clock = clock.split('.').next().unwrap_or("");
+            let mut t = clock.split(':');
             let (Some(h), Some(mi)) = (t.next(), t.next()) else {
                 return Err(bad());
             };
@@ -109,14 +158,29 @@ impl LocalTime {
         {
             return Err(bad());
         }
-        Ok(Self {
-            year,
-            month,
-            day,
-            hour,
-            minute,
-            second,
-        })
+        Ok((
+            Self {
+                year,
+                month,
+                day,
+                hour,
+                minute,
+                second,
+            },
+            offset,
+        ))
+    }
+
+    /// Shift the wall clock by whole minutes (seconds are preserved).
+    pub fn shift_minutes(self, delta: i64) -> Self {
+        let total = i64::from(self.hour) * 60 + i64::from(self.minute) + delta;
+        let days = total.div_euclid(1440);
+        let rem = total.rem_euclid(1440) as u32;
+        Self {
+            hour: rem / 60,
+            minute: rem % 60,
+            ..self.add_days(days)
+        }
     }
 
     pub fn from_parts(
@@ -222,6 +286,32 @@ mod tests {
         assert_eq!(LocalTime::parse("2028-02-28").unwrap().add_days(1).day, 29);
         assert_eq!(LocalTime::parse("2027-02-28").unwrap().add_days(1).month, 3);
         assert_eq!(t.add_days(-25).iso(), "2026-11-30T08:00:00");
+    }
+
+    #[test]
+    fn parses_offsets_when_allowed() {
+        let p = |s| LocalTime::parse_with_offset(s).unwrap();
+        assert_eq!(p("2026-04-25T14:30:00Z").1, Some(0));
+        assert_eq!(p("2026-04-25T14:30:00+02:00").1, Some(120));
+        assert_eq!(p("2026-04-25T14:30-0530").1, Some(-330));
+        assert_eq!(p("2026-04-25T14:30+02").1, Some(120));
+        assert_eq!(p("2026-04-25T14:30:00").1, None);
+        assert_eq!(p("2026-04-25").1, None);
+        for bad in [
+            "2026-04-25T14:30+25:00",
+            "2026-04-25T14:30+02:7",
+            "2026-04-25+02:00",
+            "2026-04-25T14:30Zjunk",
+        ] {
+            assert!(LocalTime::parse_with_offset(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn shifts_minutes_across_midnight() {
+        let t = LocalTime::parse("2026-12-31T23:30").unwrap();
+        assert_eq!(t.shift_minutes(45).iso(), "2027-01-01T00:15:00");
+        assert_eq!(t.shift_minutes(-24 * 60 - 30).iso(), "2026-12-30T23:00:00");
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //!
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
-use super::{MailCommand, directory, indexed, schedule, table, win};
+use super::{MailCommand, directory, indexed, modify, schedule, table, win};
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
 };
@@ -52,7 +52,7 @@ pub(super) fn default_folder(namespace: &IDispatch, number: i32) -> Result<IDisp
     win::method_object(namespace, "GetDefaultFolder", vec![VARIANT::from(number)])
 }
 
-fn folder_path(namespace: &IDispatch, path: Option<&str>) -> Result<IDispatch> {
+pub(super) fn folder_path(namespace: &IDispatch, path: Option<&str>) -> Result<IDispatch> {
     let path = path.unwrap_or("inbox").trim();
     let key = path.to_lowercase();
     let kind = match key.as_str() {
@@ -395,11 +395,44 @@ fn get_mail(namespace: &IDispatch, params: GetMailParams) -> Result<Value> {
 }
 
 impl win::Session {
+    /// Turn a short session handle into the raw EntryID/StoreID pair.
+    fn resolve_ids(
+        &self,
+        entry_id: &str,
+        store_id: &Option<String>,
+    ) -> Result<(String, Option<String>)> {
+        let mut shim = GetMailParams {
+            entry_id: entry_id.to_string(),
+            store_id: store_id.clone(),
+            include_body: None,
+            include_html: None,
+            max_body_chars: None,
+        };
+        self.refs.resolve_input(&mut shim)?;
+        Ok((shim.entry_id, shim.store_id))
+    }
+
     pub fn execute(&mut self, command: MailCommand) -> Result<Value> {
         let mut response = match command {
             MailCommand::WhoAmI => {
                 let recipient = win::object_property(&self.namespace, "CurrentUser")?;
                 Ok(json!({"current_user": win::string_property(&recipient, "Name")?}))
+            }
+            MailCommand::MarkMail(mut params) => {
+                (params.entry_id, params.store_id) =
+                    self.resolve_ids(&params.entry_id, &params.store_id)?;
+                modify::mark_mail(&self.namespace, params)
+            }
+            MailCommand::SetCategory(mut params) => {
+                (params.entry_id, params.store_id) =
+                    self.resolve_ids(&params.entry_id, &params.store_id)?;
+                modify::set_category(&self.namespace, params)
+            }
+            MailCommand::CreateFolder(params) => modify::create_folder(&self.namespace, params),
+            MailCommand::MoveMail(mut params) => {
+                (params.entry_id, params.store_id) =
+                    self.resolve_ids(&params.entry_id, &params.store_id)?;
+                modify::move_mail(&self.namespace, params)
             }
             MailCommand::ListEvents(params) => schedule::list_events(&self.namespace, params),
             MailCommand::GetEvent(mut params) => {

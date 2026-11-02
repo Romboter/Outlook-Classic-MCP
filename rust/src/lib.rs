@@ -1,7 +1,8 @@
-//! Local, read-only Outlook Classic MCP tools.
+//! Local Outlook Classic MCP tools.
 //!
 //! All mailbox operations execute on the dedicated Windows COM STA worker.
-//! No mutating tools are registered, and no Outlook data is logged to stderr.
+//! Mutating tools exist only behind the server-side permission policy, and no
+//! Outlook data is logged to stderr.
 pub mod contracts;
 pub mod localtime;
 pub mod outlook;
@@ -11,9 +12,10 @@ pub mod thread_text;
 pub mod ticket;
 
 use contracts::{
-    FolderParams, GetContactParams, GetEventParams, GetMailParams, ListContactsParams,
-    ListEventsParams, ListMailsParams, ListTasksParams, MailCommand, ResolveNameParams,
-    SearchContactsParams, SearchMailsParams, ThreadParams,
+    CreateFolderParams, FolderParams, GetContactParams, GetEventParams, GetMailParams,
+    ListContactsParams, ListEventsParams, ListMailsParams, ListTasksParams, MailCommand,
+    MarkMailParams, MoveMailParams, ResolveNameParams, SearchContactsParams, SearchMailsParams,
+    SetCategoryParams, ThreadParams,
 };
 use outlook::OutlookBridge;
 use policy::Policy;
@@ -245,6 +247,70 @@ impl OutlookMcp {
         self.call(MailCommand::ListTasks(params)).await
     }
 
+    #[tool(
+        description = "Mark a mail item read/unread and/or flagged. Requires modify permission (server mode full). Reports the state Outlook holds afterwards; status is unverified when it differs from the request.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_mark_mail(
+        &self,
+        Parameters(params): Parameters<MarkMailParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::MarkMail(params)).await
+    }
+
+    #[tool(
+        description = "Replace an item's categories with a semicolon-separated list (empty clears). Requires modify permission (server mode full). Reports the categories Outlook holds afterwards.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_set_category(
+        &self,
+        Parameters(params): Parameters<SetCategoryParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::SetCategory(params)).await
+    }
+
+    #[tool(
+        description = "Create a mail folder under a parent (default Inbox). Requires modify permission (server mode full). Fails if the name already exists.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_create_folder(
+        &self,
+        Parameters(params): Parameters<CreateFolderParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::CreateFolder(params)).await
+    }
+
+    #[tool(
+        description = "Move a mail item to another folder. Requires modify permission (server mode full). The returned entry_id is the item's NEW handle; the old one is stale. Moving into Deleted Items is refused.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_move_mail(
+        &self,
+        Parameters(params): Parameters<MoveMailParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::MoveMail(params)).await
+    }
+
     #[tool(description = "List the profile's color categories (name and Outlook color index).")]
     async fn outlook_list_categories(&self) -> CallToolResult {
         self.call(MailCommand::ListCategories).await
@@ -266,7 +332,7 @@ impl OutlookMcp {
 #[tool_handler(
     name = "outlook-classic-mcp-rs",
     version = "0.1.0",
-    instructions = "Experimental read-only Outlook Classic MCP. Requires locally running Outlook Classic on Windows. No sends/deletes or OST parsing. Search/list results contain short session-scoped entry_id handles instead of raw COM IDs; fetch a selected message with outlook_get_mail. Responses are compact JSON. Do not claim this build has passed live Outlook testing."
+    instructions = "Experimental Outlook Classic MCP; read-only unless the user started the server in a wider permission mode (see outlook_rust_status). Requires locally running Outlook Classic on Windows. No sends/deletes or OST parsing. Search/list results contain short session-scoped entry_id handles instead of raw COM IDs; fetch a selected message with outlook_get_mail. Responses are compact JSON. Do not claim this build has passed live Outlook testing."
 )]
 impl ServerHandler for OutlookMcp {}
 
@@ -323,10 +389,10 @@ mod tests {
     }
 
     #[test]
-    fn registered_tools_are_read_only() {
+    fn registered_tools_include_only_the_gated_modify_writes() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 17);
+        assert_eq!(tools.len(), 21);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -345,6 +411,10 @@ mod tests {
             "outlook_list_events",
             "outlook_get_event",
             "outlook_list_tasks",
+            "outlook_mark_mail",
+            "outlook_set_category",
+            "outlook_create_folder",
+            "outlook_move_mail",
         ] {
             assert!(names.contains(&expected));
         }

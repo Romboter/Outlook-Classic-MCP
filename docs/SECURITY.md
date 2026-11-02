@@ -10,7 +10,7 @@ The Rust server runs as the interactive Windows user and inherits that user's Ou
 
 - Register the experimental Rust server only in a trusted local test MCP client/session; don't expose it on a TCP listener or publish its output to third-party logs.
 - Never copy real mailbox contents, email addresses, EntryIDs, StoreIDs, credentials, tokens or screenshots of sensitive emails into PR descriptions, public issues, CI, benchmark reports, or example fixtures.
-- The current Rust tool router registers only six Outlook read tools and one static status tool. **No sending/deleting/moving or attachment-saving tools are implemented.** Python functionality remains separate.
+- The Rust tool router registers read tools plus four **modify** tools (`outlook_mark_mail`, `outlook_set_category`, `outlook_create_folder`, `outlook_move_mail`) that are refused unless the server runs in `full` mode. **No sending, deleting or attachment-saving tools exist.** Moving mail into Deleted Items is refused because it would bypass the delete permission. Python functionality remains separate.
 - `outlook_get_mail` plain-text bodies default to a 4,000-character budget (12,000 maximum); HTML retrieval is rejected.
 - List/search default to 10 hits (30 maximum). Thread results enforce message and per/total body limits. Always review omission and truncation flags.
 - Session handles like `m1` shorten output, but **are not credentials**. The MCP process already has the Windows user's Outlook permissions.

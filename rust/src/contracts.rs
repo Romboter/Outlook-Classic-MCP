@@ -552,6 +552,31 @@ pub fn prepare_delete(x: &DeleteItemParams, kind: ActionKind) -> Result<ActionTa
         kind,
         entry_id: x.entry_id.clone(),
         store_id: x.store_id.clone(),
+        enabled: None,
+    })
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ToggleRuleParams {
+    /// Exact name of the rule, as shown by outlook_list_rules.
+    pub rule_name: String,
+    /// true switches the rule on, false switches it off.
+    pub enabled: bool,
+}
+
+pub fn prepare_toggle_rule(x: &ToggleRuleParams) -> Result<ActionTarget, String> {
+    let name = x.rule_name.trim();
+    if name.is_empty()
+        || x.rule_name.chars().count() > 255
+        || x.rule_name.chars().any(char::is_control)
+    {
+        return Err("rule_name must be 1..255 characters on one line".into());
+    }
+    Ok(ActionTarget {
+        kind: ActionKind::ToggleRule,
+        entry_id: name.to_string(),
+        store_id: None,
+        enabled: Some(x.enabled),
     })
 }
 
@@ -653,7 +678,9 @@ impl MailCommand {
             MailCommand::ComposeInspect(_)
             | MailCommand::ComposeLocate(_)
             | MailCommand::ActionLocate { .. } => Capability::Read,
-            MailCommand::ActionPrepare(_) | MailCommand::ActionExecute { .. } => Capability::Delete,
+            MailCommand::ActionPrepare(target) | MailCommand::ActionExecute { target, .. } => {
+                target.kind.capability()
+            }
             MailCommand::ComposePrepare(_) => Capability::Draft,
             MailCommand::ComposeSend { .. } => Capability::Send,
             MailCommand::CreateEvent(_) | MailCommand::UpdateEvent(_) => Capability::Events,
@@ -1178,6 +1205,48 @@ mod tests {
                 ActionKind::DeleteEvent
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn rule_changes_need_the_rules_capability_and_a_clean_name() {
+        let target = prepare_toggle_rule(&ToggleRuleParams {
+            rule_name: " Move newsletters ".into(),
+            enabled: true,
+        })
+        .unwrap();
+        assert_eq!(target.entry_id, "Move newsletters");
+        assert_eq!(target.enabled, Some(true));
+        assert_eq!(
+            MailCommand::ActionPrepare(target).capability(),
+            Capability::Rules
+        );
+        for bad in ["", "   ", "bad\nname"] {
+            assert!(
+                prepare_toggle_rule(&ToggleRuleParams {
+                    rule_name: bad.into(),
+                    enabled: false
+                })
+                .is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(
+            prepare_toggle_rule(&ToggleRuleParams {
+                rule_name: "x".repeat(256),
+                enabled: false
+            })
+            .is_err()
+        );
+        // A rule named like a session handle is still a rule name.
+        assert_eq!(
+            prepare_toggle_rule(&ToggleRuleParams {
+                rule_name: "m1".into(),
+                enabled: true
+            })
+            .unwrap()
+            .entry_id,
+            "m1"
         );
     }
 

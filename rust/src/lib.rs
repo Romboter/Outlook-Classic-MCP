@@ -23,8 +23,9 @@ use contracts::{
     GetEventParams, GetMailParams, ListContactsParams, ListEventsParams, ListMailsParams,
     ListTasksParams, MailCommand, MarkMailParams, MoveMailParams, ReplyMailParams,
     ResolveNameParams, SearchContactsParams, SearchMailsParams, SendDraftParams, SendMailParams,
-    SetCategoryParams, ThreadParams, UpdateEventParams, checked_send_id, prepare_delete,
-    prepare_forward_mail, prepare_reply_mail, prepare_send_mail,
+    SetCategoryParams, ThreadParams, ToggleRuleParams, UpdateEventParams, checked_send_id,
+    prepare_delete, prepare_forward_mail, prepare_reply_mail, prepare_send_mail,
+    prepare_toggle_rule,
 };
 use outlook::OutlookBridge;
 use policy::{Capability, Policy};
@@ -336,13 +337,17 @@ impl OutlookMcp {
         params: DeleteItemParams,
         kind: ActionKind,
     ) -> CallToolResult {
-        if let Err(error) = self.policy.check(Capability::Delete) {
+        match prepare_delete(&params, kind) {
+            Ok(target) => self.confirmed(peer, target).await,
+            Err(error) => text_error(error),
+        }
+    }
+
+    /// Permission for this kind of action, then the approval-gated engine.
+    async fn confirmed(&self, peer: Peer<RoleServer>, target: ActionTarget) -> CallToolResult {
+        if let Err(error) = self.policy.check(target.kind.capability()) {
             return text_error(error);
         }
-        let target = match prepare_delete(&params, kind) {
-            Ok(target) => target,
-            Err(error) => return text_error(error),
-        };
         outcome_result(self.action_engine(peer).run(target).await)
     }
 
@@ -808,7 +813,27 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "After a delete reported unknown_outcome (or to confirm one), look for the item by its action_id: done, not_done or unknown. Read-only. Never try a delete again before checking.",
+        description = "Turn ONE mail rule on or off by exact name, only after the user approves a prompt showing the rule, its current and new state and what it does (rules that delete or forward mail get an extra warning). Rules take effect immediately. Nothing changes if the client cannot show the prompt or the user declines. Requires rules permission (server mode full). Check `done` in the result.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_toggle_rule(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<ToggleRuleParams>,
+    ) -> CallToolResult {
+        match prepare_toggle_rule(&params) {
+            Ok(target) => self.confirmed(peer, target).await,
+            Err(error) => text_error(error),
+        }
+    }
+
+    #[tool(
+        description = "After a delete or rule change reported unknown_outcome (or to confirm one), look for the item by its action_id: done, not_done or unknown. Read-only. Never try a delete again before checking.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -927,7 +952,7 @@ mod tests {
     fn registered_tools_exclude_not_yet_implemented_writes() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 33);
+        assert_eq!(tools.len(), 34);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -962,10 +987,11 @@ mod tests {
             "outlook_delete_mail",
             "outlook_delete_event",
             "outlook_check_action",
+            "outlook_toggle_rule",
         ] {
             assert!(names.contains(&expected));
         }
-        for forbidden in ["outlook_respond_event", "outlook_toggle_rule"] {
+        for forbidden in ["outlook_respond_event", "outlook_save_attachments"] {
             assert!(!names.contains(&forbidden));
         }
     }

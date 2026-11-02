@@ -1,5 +1,5 @@
-//! Confirmed actions that are not sends (today: deleting mail and events).
-//! See `docs/CONFIRMED-ACTIONS-DESIGN.md`.
+//! Confirmed actions that are not sends: deleting mail and events, and
+//! switching mail rules. See `docs/CONFIRMED-ACTIONS-DESIGN.md`.
 //!
 //! No mode or setting skips the person's approval: the prompt is built from
 //! facts read from Outlook, a client that cannot show it means nothing
@@ -8,6 +8,7 @@
 //! `ActionPort` and `Confirmer`, so every path is tested with fakes.
 #![allow(async_fn_in_trait)]
 
+use crate::policy::Capability;
 use crate::send::{Confirmation, Confirmer, Outcome, PortError};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -20,11 +21,13 @@ use std::{
 const HOUR: Duration = Duration::from_secs(3600);
 
 /// Thresholds are speed bumps (they add a section to the prompt); the hard
-/// ceiling only stops runaways. Strict turns the threshold into a refusal.
+/// ceilings only stop runaways. Strict turns a threshold into a refusal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionSettings {
     pub delete_per_hour: usize,
     pub delete_hard_max_per_hour: usize,
+    pub rule_per_hour: usize,
+    pub rule_hard_max_per_hour: usize,
     pub strict: bool,
 }
 
@@ -33,6 +36,8 @@ impl Default for ActionSettings {
         Self {
             delete_per_hour: 10,
             delete_hard_max_per_hour: 50,
+            rule_per_hour: 5,
+            rule_hard_max_per_hour: 20,
             strict: false,
         }
     }
@@ -62,6 +67,11 @@ impl ActionSettings {
                 "OUTLOOK_MCP_DELETE_HARD_MAX_PER_HOUR",
                 defaults.delete_hard_max_per_hour,
             )?,
+            rule_per_hour: number("OUTLOOK_MCP_RULE_PER_HOUR", defaults.rule_per_hour)?,
+            rule_hard_max_per_hour: number(
+                "OUTLOOK_MCP_RULE_HARD_MAX_PER_HOUR",
+                defaults.rule_hard_max_per_hour,
+            )?,
             strict: matches!(
                 get("OUTLOOK_MCP_ACTION_STRICT")
                     .map(|v| v.trim().to_ascii_lowercase())
@@ -69,10 +79,20 @@ impl ActionSettings {
                 Some("1" | "true" | "yes")
             ),
         };
-        if settings.delete_hard_max_per_hour < settings.delete_per_hour {
+        if settings.delete_hard_max_per_hour < settings.delete_per_hour
+            || settings.rule_hard_max_per_hour < settings.rule_per_hour
+        {
             return Err("hard action ceilings must not be below the usual limits".into());
         }
         Ok(settings)
+    }
+
+    /// `(usual limit, hard ceiling)` for one kind of action.
+    fn limits(&self, kind: ActionKind) -> (usize, usize) {
+        match kind.class() {
+            "rules" => (self.rule_per_hour, self.rule_hard_max_per_hour),
+            _ => (self.delete_per_hour, self.delete_hard_max_per_hour),
+        }
     }
 }
 
@@ -80,6 +100,7 @@ impl ActionSettings {
 pub enum ActionKind {
     DeleteMail,
     DeleteEvent,
+    ToggleRule,
 }
 
 impl ActionKind {
@@ -87,6 +108,30 @@ impl ActionKind {
         match self {
             ActionKind::DeleteMail => "delete_mail",
             ActionKind::DeleteEvent => "delete_event",
+            ActionKind::ToggleRule => "toggle_rule",
+        }
+    }
+
+    /// Actions in one class share an hourly counter.
+    fn class(self) -> &'static str {
+        match self {
+            ActionKind::DeleteMail | ActionKind::DeleteEvent => "deletes",
+            ActionKind::ToggleRule => "rules",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self.class() {
+            "rules" => "rule changes",
+            _ => "deletes",
+        }
+    }
+
+    /// The permission this kind of action needs.
+    pub fn capability(self) -> Capability {
+        match self {
+            ActionKind::DeleteMail | ActionKind::DeleteEvent => Capability::Delete,
+            ActionKind::ToggleRule => Capability::Rules,
         }
     }
 }
@@ -94,9 +139,11 @@ impl ActionKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionTarget {
     pub kind: ActionKind,
-    /// Short session handle or raw EntryID, as supplied by the caller.
+    /// Short session handle or raw EntryID, or the rule name for rule changes.
     pub entry_id: String,
     pub store_id: Option<String>,
+    /// For rule changes: the state being asked for.
+    pub enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -155,8 +202,10 @@ enum State {
 struct Inner {
     state: HashMap<String, State>,
     targets: HashMap<String, ActionTarget>,
-    attempts: Vec<Instant>,
-    grants: Vec<(Instant, usize)>,
+    /// When each action was attempted, per class, for the hourly window.
+    attempts: HashMap<&'static str, Vec<Instant>>,
+    /// Human-approved extra actions: (when approved, how many), per class.
+    grants: HashMap<&'static str, Vec<(Instant, usize)>>,
 }
 
 /// Shared across tool calls so one process has one action history.
@@ -240,6 +289,10 @@ impl<P: ActionPort, C: Confirmer> ActionEngine<P, C> {
     }
 
     pub async fn run(&self, target: ActionTarget) -> Outcome {
+        let kind = target.kind;
+        let class = kind.class();
+        let (usual, hard) = self.settings.limits(kind);
+
         // A target whose last attempt has an unknown outcome stays blocked
         // until outlook_check_action says what happened.
         {
@@ -249,7 +302,7 @@ impl<P: ActionPort, C: Confirmer> ActionEngine<P, C> {
                     && ledger
                         .targets
                         .get(id)
-                        .is_some_and(|t| t.entry_id == target.entry_id)
+                        .is_some_and(|t| t.kind == kind && t.entry_id == target.entry_id)
             });
             if blocked {
                 return outcome(
@@ -275,27 +328,27 @@ impl<P: ActionPort, C: Confirmer> ActionEngine<P, C> {
         let now = (self.clock)();
         let (used, allowance) = {
             let mut ledger = self.ledger.0.lock().unwrap();
-            ledger.attempts.retain(|t| now.duration_since(*t) < HOUR);
-            ledger.grants.retain(|(t, _)| now.duration_since(*t) < HOUR);
-            let extra: usize = ledger.grants.iter().map(|(_, n)| n).sum();
-            (
-                ledger.attempts.len(),
-                (self.settings.delete_per_hour + extra).min(self.settings.delete_hard_max_per_hour),
-            )
+            let attempts = ledger.attempts.entry(class).or_default();
+            attempts.retain(|t| now.duration_since(*t) < HOUR);
+            let used = attempts.len();
+            let grants = ledger.grants.entry(class).or_default();
+            grants.retain(|(t, _)| now.duration_since(*t) < HOUR);
+            let extra: usize = grants.iter().map(|(_, n)| n).sum();
+            (used, (usual + extra).min(hard))
         };
-        if used >= self.settings.delete_hard_max_per_hour {
+        if used >= hard {
             return outcome(
                 true,
                 json!({"status": "refused", "done": false, "action_id": id,
-                    "reason": format!("{used} deletes this hour reached the hard ceiling of {}; change the server setting if intended", self.settings.delete_hard_max_per_hour)}),
+                    "reason": format!("{used} {} this hour reached the hard ceiling of {hard}; change the server setting if intended", kind.label())}),
             );
         }
         let mut issues = Vec::new();
         let needs_grant = used >= allowance;
         if needs_grant {
             issues.push(format!(
-                "{used} deletes already this hour (usual limit {}); approving allows {} more",
-                self.settings.delete_per_hour, self.settings.delete_per_hour
+                "{used} {} already this hour (usual limit {usual}); approving allows {usual} more",
+                kind.label()
             ));
         }
         if self.settings.strict && !issues.is_empty() {
@@ -339,11 +392,13 @@ impl<P: ActionPort, C: Confirmer> ActionEngine<P, C> {
             }
             ledger.state.insert(id.clone(), State::Acting);
             ledger.targets.insert(id.clone(), target.clone());
-            ledger.attempts.push(attempt_at);
+            ledger.attempts.entry(class).or_default().push(attempt_at);
             if needs_grant {
                 ledger
                     .grants
-                    .push((attempt_at, self.settings.delete_per_hour));
+                    .entry(class)
+                    .or_default()
+                    .push((attempt_at, usual));
             }
         }
 
@@ -355,14 +410,14 @@ impl<P: ActionPort, C: Confirmer> ActionEngine<P, C> {
                 outcome(
                     false,
                     json!({"status": "done", "done": true, "action_id": id,
-                        "kind": target.kind.name(), "summary": prepared.preview.summary}),
+                        "kind": kind.name(), "summary": prepared.preview.summary}),
                 )
             }
             Err(PortError::NotSent(why)) => {
                 // Provably not done: free the slot so a fresh request can try again.
                 ledger.state.remove(&id);
                 ledger.targets.remove(&id);
-                ledger.attempts.pop();
+                ledger.attempts.entry(class).or_default().pop();
                 outcome(
                     true,
                     json!({"status": "not_done", "done": false, "action_id": id, "reason": why}),
@@ -516,6 +571,7 @@ mod tests {
             kind: ActionKind::DeleteMail,
             entry_id: id.into(),
             store_id: None,
+            enabled: None,
         }
     }
 
@@ -622,6 +678,7 @@ mod tests {
             delete_per_hour: 2,
             delete_hard_max_per_hour: 5,
             strict: false,
+            ..ActionSettings::default()
         };
         let port = FakePort::new();
         let calls = Arc::clone(&port.execute_calls);
@@ -640,12 +697,56 @@ mod tests {
         assert!(prompts[2].contains("deletes already this hour"));
     }
 
+    fn rule_target(name: &str, on: bool) -> ActionTarget {
+        ActionTarget {
+            kind: ActionKind::ToggleRule,
+            entry_id: name.into(),
+            store_id: None,
+            enabled: Some(on),
+        }
+    }
+
+    #[tokio::test]
+    async fn rule_changes_have_their_own_counter_and_thresholds() {
+        let settings = ActionSettings {
+            delete_per_hour: 1,
+            delete_hard_max_per_hour: 5,
+            rule_per_hour: 2,
+            rule_hard_max_per_hour: 3,
+            strict: false,
+        };
+        let port = FakePort::new();
+        let calls = Arc::clone(&port.execute_calls);
+        let (e, prompts) = engine(port, Confirmation::Accepted, settings);
+        // Deleting does not use up rule changes.
+        assert_eq!(status(&e.run(target("m1")).await), "done");
+        let mut statuses = Vec::new();
+        for i in 0..4 {
+            statuses
+                .push(status(&e.run(rule_target(&format!("rule {i}"), true)).await).to_string());
+        }
+        assert_eq!(statuses, ["done", "done", "done", "refused"]);
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+        let prompts = prompts.lock().unwrap();
+        // Prompt 0 is the delete; prompt 3 is the third rule change, over the usual 2.
+        assert!(prompts[3].contains("rule changes already this hour"));
+        assert!(!prompts[1].contains("OUTSIDE THE USUAL LIMITS"));
+    }
+
+    #[test]
+    fn kinds_map_to_their_capabilities() {
+        assert_eq!(ActionKind::DeleteMail.capability(), Capability::Delete);
+        assert_eq!(ActionKind::DeleteEvent.capability(), Capability::Delete);
+        assert_eq!(ActionKind::ToggleRule.capability(), Capability::Rules);
+    }
+
     #[tokio::test]
     async fn strict_mode_refuses_at_the_threshold_without_prompting() {
         let settings = ActionSettings {
             delete_per_hour: 1,
             delete_hard_max_per_hour: 5,
             strict: true,
+            ..ActionSettings::default()
         };
         let port = FakePort::new();
         let (e, prompts) = engine(port, Confirmation::Accepted, settings);
@@ -660,6 +761,7 @@ mod tests {
             delete_per_hour: 1,
             delete_hard_max_per_hour: 5,
             strict: false,
+            ..ActionSettings::default()
         };
         let now = Arc::new(Mutex::new(Instant::now()));
         let clock_now = Arc::clone(&now);

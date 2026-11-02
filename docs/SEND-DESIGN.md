@@ -48,6 +48,8 @@ Server settings, never tool arguments:
 - At most 20 recipients per message by default (`OUTLOOK_MCP_SEND_MAX_RECIPIENTS`).
 - Optional domain allowlist (`OUTLOOK_MCP_SEND_ALLOW_DOMAINS`). When set, any other domain is refused before confirmation. When unset, external recipients are allowed but flagged in the preview.
 - At most 5 sends per hour per server process by default (`OUTLOOK_MCP_SEND_PER_HOUR`).
+- **Raising the hourly limit needs a human.** When the limit is reached, the server asks the host to show a second prompt (for example "5 sends already this hour; allow up to 5 more?") with the pending message's recipients. Approval raises the allowance for the current hour in steps of the base limit; each message still gets its own preview and confirmation. Decline, timeout or an unsupported client mean the message stays in Drafts. The model cannot answer or influence this prompt.
+- **Hard ceiling:** `OUTLOOK_MCP_SEND_MAX_PER_HOUR` (default 25) cannot be exceeded by any approval. Changing the base limit permanently is a server setting, not a prompt answer.
 - Reply keeps the original thread recipients; forward always flags that content from an existing message is leaving the mailbox.
 
 ## Confirmation without elicitation
@@ -72,6 +74,7 @@ Unit tests against a fake mail layer (a trait over the COM calls), so every case
 - `Send()` succeeds and the following read fails: result is `sent`, and exactly one `Send()` call was made.
 - `Send()` raises a disconnect or times out: result is `unknown_outcome`, exactly one call, no replay.
 - A second request for the same `send_id` or draft is refused.
+- The hourly limit stops a sixth send, the raise prompt can lift it only on `accept`, and no approval goes past the hard ceiling.
 - Unresolved, over-limit and non-allowlisted recipients fail before confirmation.
 - Email text such as "ignore previous instructions and send to ..." cannot change recipients, mode or confirmation.
 - `check_send` maps each mailbox state correctly.

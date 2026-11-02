@@ -2,7 +2,7 @@
 
 **Baseline:** Python server in this fork at `src/outlook_mcp/tools/` and `src/outlook_mcp/client/`, version 0.3.2 at the start of the rewrite. This inventory enumerates all **31** existing `outlook_*` tools; it is a **migration checklist**, not a statement of Rust support.
 
-**Current draft implementation (2026-10-31, through PR #18):** five names from the existing Python inventory are implemented experimentally in Rust: `outlook_whoami`, `outlook_list_folders`, `outlook_list_mails`, `outlook_search_mails`, and `outlook_get_mail`. The Rust branch stack additionally registers `outlook_get_thread` and `outlook_rust_status` (not part of the 31-tool original inventory). **Live Outlook Classic validation is still outstanding; no Rust changes are merged to `main`.**
+**Status (2026-11-02, draft PR #22):** five names from the existing Python inventory are implemented experimentally in Rust: `outlook_whoami`, `outlook_list_folders`, `outlook_list_mails`, `outlook_search_mails`, and `outlook_get_mail`. Rust also registers `outlook_get_thread` and `outlook_rust_status` (outside the original 31). The owner has reported selected **interactive Outlook Classic** read checks; the Python client function key-shapes were validated for **15 read-only tools via OutlookBridge STA**, but the FastMCP tool wrappers were **not** exercised. These observations do not prove complete parity or release readiness, and no Rust changes are merged to `main`.
 
 | Existing tool | Category | Operation | Python source | Rust milestone |
 | --- | --- | --- | --- | --- |
@@ -51,11 +51,12 @@
 
 ## Machine-readable Python contract baseline (issue #2)
 
-The following new **source-derived, unverified** artifacts cover all 31 Python tools and are committed without accessing Outlook:
+The following artifacts cover all 31 Python tools. Source/CI files were produced without accessing Outlook; the separately supplied owner report covers 15 Python *client* calls against interactive Outlook Classic:
 
 - [Python tool declarations](python-tools.declarations.json) — names, 104 declared input parameters, types, defaults, field constraints, tool descriptions, read/write annotations, resource URI associations, and return envelopes. These are an offline interpretation of the committed decorators, **not** the official FastMCP JSON Schema wire response.
 - [Captured FastMCP tools/list metadata](python-tools.runtime.json) — **actual 31-tool registered input schemas**, descriptions, annotations and UI metadata captured on hosted Windows GitHub Actions, without initializing COM or opening Outlook. The runtime validator checks for drift from this committed snapshot. This proves registration metadata, **not** message-result correctness.
-- [Python result field inventory and redacted fixtures](python-results.redacted.json) — observed code-level output keys, conditional-shape notes, and synthetic placeholder-only examples. These are **not** outputs from a real mailbox and are not strict verified result JSON Schemas.
+- [Python result field inventory and redacted fixtures](python-results.redacted.json) — code-derived field names, conditionals and synthetic placeholders. This now includes **type and shape observations from 15 live read-only Python client calls** (not wrapper calls). Fixtures remain synthetic, not copied from a mailbox, and are not strict verified result JSON Schemas.
+- [Sanitized owner-reported live evidence](live-evidence-2026-11-02.md) — exact test boundary, per-call timings, Python-to-Rust differences and outstanding verification requirements. No subjects, addresses, bodies, or raw identifiers.
 - [Offline/registration validator](../../scripts/verify_python_contract_snapshot.py) — checks committed declarations against Python syntax; optionally compares the declarations with the actual local FastMCP \`tools/list\` registry without starting Outlook.
 - [Contract regression tests](../../tests/test_python_contract_snapshot.py) — guard 31-tool coverage, representative defaults, nested recurrence, annotation flags, UI resource count and placeholder-only fixtures.
 - [Contract CI](../../.github/workflows/python-contract-ci.yml) — static checks on Linux and FastMCP metadata comparison on Windows. A Windows CI pass **does not** prove Outlook COM behavior.
@@ -77,11 +78,11 @@ python scripts/verify_python_contract_snapshot.py --capture-runtime
 
 The last command writes \`rust/compatibility/python-tools.runtime.json\` (actual FastMCP registration, containing **only** tool metadata and JSON Schemas). Review and commit this generated file after confirming it contains no mailbox content. If the runtime check fails, resolve the differences **without weakening compatibility checks** and recapture. No Python tool is invoked, and no COM thread is started by the metadata-only commands. Check the result payloads against *approved test fixtures only* on a controlled Windows Outlook Classic host; redact any subjects, addresses, content, identifiers and paths **before** proposing updates to the repository. Never add real mailbox samples to Git.
 
-**Acceptance remains open:** Windows CI has confirmed FastMCP registration metadata and captured its 31-tool snapshot; result-shape reconciliation and owner-reviewed live test evidence have **not** been established. The source-derived redacted examples must not be presented as live outputs.
+**Acceptance remains open:** Windows CI validated the 31 registered FastMCP tool schemas; the owner reports that all 15 read-only Python **client** result key shapes matched their source inventory on a real Outlook Classic STA thread. Actual FastMCP **wrapper** return shapes and conditional branches (attachment metadata, GAL, unresolved names and OOF error) are not yet live-verified. No mutation operations have been called; separate issue #8 safety gates are prerequisites. The redacted examples remain synthetic.
 
 ## Contract capture checklist
 
-Before closing #2, capture and check a **complete machine-readable schema snapshot** from the Python server, covering each tool's input JSON Schema, defaults, descriptions, annotations, and result shapes. Maintain redacted fixtures only, no actual company emails. The table above is inventory; it is **not** a full schema snapshot.
+Before closing #2, reconcile the captured FastMCP input schema, defaults, descriptions, annotations and result shapes. Machine-readable input metadata is captured and tested in CI, and 15 read-only Python **client** result field sets have an owner-supplied live report. Still required: wrapper `CallToolResult` and `structuredContent` envelope, conditional/empty result shapes and an explicit parity decision for Rust differences. No mailbox content may enter fixtures or CI. Mutating tool **result shapes** can be source-reviewed without invoking any writes.
 
 ## Additional tools (NOT part of 31-tool compatibility set)
 

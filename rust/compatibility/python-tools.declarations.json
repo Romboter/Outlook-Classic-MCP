@@ -1,0 +1,1664 @@
+{
+  "format": "outlook-classic-mcp-python-declaration-snapshot-v1",
+  "capturedFrom": "Romboter/Outlook-Classic-MCP",
+  "sourceBranch": "fix/thread-quote-trim-live-test",
+  "sourceCommit": "40639f3b7546a93958db76e611596f8cd3471994",
+  "provenance": "Static extraction of committed Python @mcp.tool declarations; NOT a live FastMCP tools/list response. Verify against actual FastMCP registration on the Python host; no Outlook calls or mailbox fixtures were used.",
+  "sourceFiles": [
+    {
+      "path": "src/outlook_mcp/tools/account.py",
+      "sha": "a102325760e33efe984eff9962d8cc34a039e90b"
+    },
+    {
+      "path": "src/outlook_mcp/tools/calendar.py",
+      "sha": "e7dec1b3465b52b4ec9a349ed4dea54ce1745697"
+    },
+    {
+      "path": "src/outlook_mcp/tools/categories.py",
+      "sha": "528e13b7e78baab2fa0919d6584181d9cd9974f0"
+    },
+    {
+      "path": "src/outlook_mcp/tools/contacts.py",
+      "sha": "3a7ce5eaad0af475713dcac344aa3642c5e8bb88"
+    },
+    {
+      "path": "src/outlook_mcp/tools/folders.py",
+      "sha": "cda1a14091ee6b0bb8b1b08198ebeb5344e4ee12"
+    },
+    {
+      "path": "src/outlook_mcp/tools/mail.py",
+      "sha": "8deb6a009bd2922dcb5af4b9dfaf004aa7404287"
+    },
+    {
+      "path": "src/outlook_mcp/tools/ooo.py",
+      "sha": "3db434d99932117ea9a68c16b4541005e1824caf"
+    },
+    {
+      "path": "src/outlook_mcp/tools/rules.py",
+      "sha": "f3c8d6bc4cb11d4da33d09e5d58a637c15096f86"
+    },
+    {
+      "path": "src/outlook_mcp/tools/tasks.py",
+      "sha": "044269bd3b0551fcd23c348da51d27b869ca8f01"
+    }
+  ],
+  "toolCount": 31,
+  "tools": [
+    {
+      "name": "outlook_complete_task",
+      "description": "Mark a task as 100% complete.",
+      "source": "src/outlook_mcp/tools/tasks.py",
+      "annotations": {
+        "title": "Mark Outlook task complete",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the task."
+          }
+        },
+        "required": [
+          "entry_id"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_create_event",
+      "description": "Create a calendar event or meeting invite.",
+      "source": "src/outlook_mcp/tools/calendar.py",
+      "annotations": {
+        "title": "Create Outlook calendar event",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "description": "Event subject."
+          },
+          "start": {
+            "type": "string",
+            "description": "ISO-8601 start time (e.g. '2026-05-01T14:00:00')."
+          },
+          "end": {
+            "type": "string",
+            "description": "ISO-8601 end time."
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "attendees": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Email addresses. Adding any attendee turns this into a meeting."
+          },
+          "is_online_meeting": {
+            "type": "boolean",
+            "default": false
+          },
+          "reminder_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 15,
+            "minimum": 0,
+            "maximum": 10080
+          },
+          "recurrence": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Recurrence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Recurrence pattern. Omit for a single occurrence."
+          }
+        },
+        "required": [
+          "subject",
+          "start",
+          "end"
+        ],
+        "$defs": {
+          "Recurrence": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "daily",
+                  "weekly",
+                  "monthly",
+                  "yearly"
+                ],
+                "type": "string"
+              },
+              "interval": {
+                "type": "integer",
+                "default": 1,
+                "minimum": 1
+              },
+              "occurrences": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "end_date": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        }
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_create_folder",
+      "description": "Create a sub-folder under the given parent.",
+      "source": "src/outlook_mcp/tools/folders.py",
+      "annotations": {
+        "title": "Create Outlook folder",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the new folder."
+          },
+          "parent": {
+            "type": "string",
+            "default": "inbox",
+            "description": "Parent folder. Defaults to inbox."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_create_task",
+      "description": "Create a new task in the default Tasks folder.",
+      "source": "src/outlook_mcp/tools/tasks.py",
+      "annotations": {
+        "title": "Create Outlook task",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "description": "Task subject."
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 date/datetime."
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "importance": {
+            "type": "string",
+            "default": "normal",
+            "description": "low/normal/high."
+          },
+          "reminder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 reminder time."
+          }
+        },
+        "required": [
+          "subject"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_delete_event",
+      "description": "Delete a calendar event (sends cancellation if it has attendees).",
+      "source": "src/outlook_mcp/tools/calendar.py",
+      "annotations": {
+        "title": "Delete Outlook calendar event",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the event."
+          }
+        },
+        "required": [
+          "entry_id"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_delete_mail",
+      "description": "Delete a mail (Outlook moves it to Deleted Items).",
+      "source": "src/outlook_mcp/tools/mail.py",
+      "annotations": {
+        "title": "Delete Outlook mail (move to Deleted Items)",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the mail to delete."
+          }
+        },
+        "required": [
+          "entry_id"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_forward_mail",
+      "description": "Forward an existing mail with an optional added note.",
+      "source": "src/outlook_mcp/tools/mail.py",
+      "annotations": {
+        "title": "Forward Outlook mail",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the mail to forward."
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Forward recipients."
+          },
+          "body": {
+            "type": "string",
+            "default": "",
+            "description": "Optional note above the forwarded mail."
+          },
+          "cc": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "CC recipients."
+          },
+          "html": {
+            "type": "boolean",
+            "default": false,
+            "description": "Treat body as HTML."
+          }
+        },
+        "required": [
+          "entry_id",
+          "to"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_get_contact",
+      "description": "Fetch full details for one contact.",
+      "source": "src/outlook_mcp/tools/contacts.py",
+      "annotations": {
+        "title": "Get Outlook contact",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the contact."
+          },
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": [
+          "entry_id"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_get_event",
+      "description": "Fetch an event with attendees, body, and recurrence info.",
+      "source": "src/outlook_mcp/tools/calendar.py",
+      "annotations": {
+        "title": "Get Outlook calendar event",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the event."
+          },
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": [
+          "entry_id"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "CallToolResult",
+        "successEnvelope": "CallToolResult with content and structuredContent",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": true,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_get_mail",
+      "description": "Fetch body, headers, and attachment list for one mail item.",
+      "source": "src/outlook_mcp/tools/mail.py",
+      "annotations": {
+        "title": "Get full Outlook mail",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "EntryID of the mail item."
+          },
+          "include_body": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include the plain-text body."
+          },
+          "include_html": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also include the raw HTML body. Off by default — it is usually huge and rarely needed; the plain-text body carries the same content."
+          },
+          "max_body_chars": {
+            "type": "integer",
+            "default": 10000,
+            "minimum": 0,
+            "description": "Truncate the body beyond this many chars (0 = no limit)."
+          },
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": [
+          "entry_id"
+        ]
+      },
+      "uiResource": "ui://outlook/mail-view.html",
+      "returnContract": {
+        "returnAnnotation": "CallToolResult",
+        "successEnvelope": "CallToolResult with content and structuredContent",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": true,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_get_out_of_office",
+      "description": "Check whether Out-of-Office auto-reply is currently enabled.",
+      "source": "src/outlook_mcp/tools/ooo.py",
+      "annotations": {
+        "title": "Check Out-of-Office (auto-reply) status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": []
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_list_categories",
+      "description": "List the color categories configured in this Outlook profile.",
+      "source": "src/outlook_mcp/tools/categories.py",
+      "annotations": {
+        "title": "List Outlook color categories",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": []
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_list_contacts",
+      "description": "List saved contacts from every contact folder in every store.",
+      "source": "src/outlook_mcp/tools/contacts.py",
+      "annotations": {
+        "title": "List Outlook contacts",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 200
+          },
+          "offset": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0
+          },
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": []
+      },
+      "uiResource": "ui://outlook/contacts.html",
+      "returnContract": {
+        "returnAnnotation": "CallToolResult",
+        "successEnvelope": "CallToolResult with content and structuredContent",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": true,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_list_events",
+      "description": "List calendar events in a date range, including recurring instances.",
+      "source": "src/outlook_mcp/tools/calendar.py",
+      "annotations": {
+        "title": "List Outlook calendar events",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 start of range. Defaults to now."
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 end of range. Defaults to start+14d."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 200
+          },
+          "include_recurrences": {
+            "type": "boolean",
+            "default": true
+          },
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": []
+      },
+      "uiResource": "ui://outlook/calendar.html",
+      "returnContract": {
+        "returnAnnotation": "CallToolResult",
+        "successEnvelope": "CallToolResult with content and structuredContent",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": true,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_list_folders",
+      "description": "List the folder tree with item and unread counts.",
+      "source": "src/outlook_mcp/tools/folders.py",
+      "annotations": {
+        "title": "List Outlook folders",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Folder to start from. Defaults to default mail store root."
+          },
+          "max_depth": {
+            "type": "integer",
+            "default": 4,
+            "minimum": 1,
+            "maximum": 10
+          },
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": []
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_list_mails",
+      "description": "List mail items from a folder, newest first.",
+      "source": "src/outlook_mcp/tools/mail.py",
+      "annotations": {
+        "title": "List Outlook mails",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "default": "inbox",
+            "description": "Folder name. Either a well-known name (inbox, sent, drafts, deleted, junk) or a path like 'Inbox/Projects/Quinn'."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 25,
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Max items."
+          },
+          "offset": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "description": "Pagination offset."
+          },
+          "unread_only": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return only unread."
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 lower bound on ReceivedTime."
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 upper bound on ReceivedTime."
+          },
+          "from_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Substring match on sender email."
+          },
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": []
+      },
+      "uiResource": "ui://outlook/mail-list.html",
+      "returnContract": {
+        "returnAnnotation": "CallToolResult",
+        "successEnvelope": "CallToolResult with content and structuredContent",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": true,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_list_rules",
+      "description": "List all mail rules with their enabled status.",
+      "source": "src/outlook_mcp/tools/rules.py",
+      "annotations": {
+        "title": "List Outlook mail rules",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": []
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_list_tasks",
+      "description": "List tasks (to-dos). By default only incomplete tasks are returned.",
+      "source": "src/outlook_mcp/tools/tasks.py",
+      "annotations": {
+        "title": "List Outlook tasks",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 200
+          },
+          "include_completed": {
+            "type": "boolean",
+            "default": false
+          },
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": []
+      },
+      "uiResource": "ui://outlook/tasks.html",
+      "returnContract": {
+        "returnAnnotation": "CallToolResult",
+        "successEnvelope": "CallToolResult with content and structuredContent",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": true,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_mark_mail",
+      "description": "Toggle read state and/or follow-up flag on a mail.",
+      "source": "src/outlook_mcp/tools/mail.py",
+      "annotations": {
+        "title": "Mark Outlook mail read/unread or flag it",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the mail."
+          },
+          "read": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "True=mark read, False=unread, None=no change."
+          },
+          "flagged": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "True=flag for follow-up, False=clear flag."
+          }
+        },
+        "required": [
+          "entry_id"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_move_mail",
+      "description": "Move a mail to another folder. Returns the new EntryID.",
+      "source": "src/outlook_mcp/tools/mail.py",
+      "annotations": {
+        "title": "Move Outlook mail to folder",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the mail to move."
+          },
+          "target_folder": {
+            "type": "string",
+            "description": "Destination folder."
+          }
+        },
+        "required": [
+          "entry_id",
+          "target_folder"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_reply_mail",
+      "description": "Reply (or reply-all) to an existing mail.",
+      "source": "src/outlook_mcp/tools/mail.py",
+      "annotations": {
+        "title": "Reply to Outlook mail",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the mail to reply to."
+          },
+          "body": {
+            "type": "string",
+            "description": "Reply body. Quoted original is appended."
+          },
+          "reply_all": {
+            "type": "boolean",
+            "default": false,
+            "description": "Reply to all recipients."
+          },
+          "html": {
+            "type": "boolean",
+            "default": false,
+            "description": "Treat body as HTML."
+          },
+          "attachments": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Files to attach."
+          }
+        },
+        "required": [
+          "entry_id",
+          "body"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_resolve_name",
+      "description": "Resolve a name against the address book/directory to its SMTP address.",
+      "source": "src/outlook_mcp/tools/contacts.py",
+      "annotations": {
+        "title": "Resolve a name to an email address",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Display name, alias, or address to resolve (like Ctrl+K in Outlook)."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_respond_event",
+      "description": "Accept / tentatively accept / decline a meeting invite.",
+      "source": "src/outlook_mcp/tools/calendar.py",
+      "annotations": {
+        "title": "Respond to a meeting invite",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the meeting."
+          },
+          "response": {
+            "type": "string",
+            "description": "One of: 'accept', 'tentative', 'decline'."
+          },
+          "send_response": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "entry_id",
+          "response"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_save_attachments",
+      "description": "Save one or all attachments from a mail to a local directory.",
+      "source": "src/outlook_mcp/tools/mail.py",
+      "annotations": {
+        "title": "Save Outlook mail attachments to disk",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the mail."
+          },
+          "output_dir": {
+            "type": "string",
+            "description": "Absolute directory under your user profile."
+          },
+          "attachment_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "minimum": 1,
+            "description": "1-indexed attachment. Omit to save all."
+          }
+        },
+        "required": [
+          "entry_id",
+          "output_dir"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_search_contacts",
+      "description": "Search saved contacts and (by default) the org directory.",
+      "source": "src/outlook_mcp/tools/contacts.py",
+      "annotations": {
+        "title": "Search Outlook contacts",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Search words; all must match (name, email, company, or title)."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 25,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "include_directory": {
+            "type": "boolean",
+            "default": true,
+            "description": "Also search the org directory (Exchange Global Address List). Can take a few seconds on large directories."
+          },
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "uiResource": "ui://outlook/contacts.html",
+      "returnContract": {
+        "returnAnnotation": "CallToolResult",
+        "successEnvelope": "CallToolResult with content and structuredContent",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": true,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_search_mails",
+      "description": "Search a mail folder by subject, body, or sender.",
+      "source": "src/outlook_mcp/tools/mail.py",
+      "annotations": {
+        "title": "Search Outlook mails",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Search keywords or DASL filter."
+          },
+          "folder": {
+            "type": "string",
+            "default": "inbox",
+            "description": "Folder to search in."
+          },
+          "scope": {
+            "type": "string",
+            "default": "subject_body",
+            "description": "Where to look: 'subject_body' (default), 'subject', 'from', or 'dasl' to pass `query` as a raw DASL @SQL filter."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 25,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "uiResource": "ui://outlook/mail-list.html",
+      "returnContract": {
+        "returnAnnotation": "CallToolResult",
+        "successEnvelope": "CallToolResult with content and structuredContent",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": true,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_send_mail",
+      "description": "Compose and send a new mail. Set save_only=True to save to Drafts.",
+      "source": "src/outlook_mcp/tools/mail.py",
+      "annotations": {
+        "title": "Send Outlook mail",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Recipient addresses."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Subject line."
+          },
+          "body": {
+            "type": "string",
+            "description": "Message body. Plain text unless html=True."
+          },
+          "cc": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "CC recipients."
+          },
+          "bcc": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "BCC recipients."
+          },
+          "html": {
+            "type": "boolean",
+            "default": false,
+            "description": "Treat body as HTML."
+          },
+          "attachments": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Absolute paths to local files."
+          },
+          "importance": {
+            "type": "string",
+            "default": "normal",
+            "description": "One of: 'low', 'normal', 'high'."
+          },
+          "save_only": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, save to Drafts instead of sending."
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_set_category",
+      "description": "Replace the categories on an item (mail / event / task).",
+      "source": "src/outlook_mcp/tools/categories.py",
+      "annotations": {
+        "title": "Set categories on a mail / event / task",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the item."
+          },
+          "categories": {
+            "type": "string",
+            "description": "Comma-separated category names (e.g. 'Important' or 'Work, Follow-up'). Empty string clears all categories."
+          }
+        },
+        "required": [
+          "entry_id",
+          "categories"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_toggle_rule",
+      "description": "Enable or disable a mail rule by name. Modifies live mail rules.",
+      "source": "src/outlook_mcp/tools/rules.py",
+      "annotations": {
+        "title": "Enable or disable a mail rule",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rule_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact rule name (use outlook_list_rules)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "True to enable, False to disable."
+          }
+        },
+        "required": [
+          "rule_name",
+          "enabled"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_update_event",
+      "description": "Update fields on an existing event. Only non-null fields are written.",
+      "source": "src/outlook_mcp/tools/calendar.py",
+      "annotations": {
+        "title": "Update Outlook calendar event",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "description": "EntryID of the event."
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "entry_id"
+        ]
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "json text or static response",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    },
+    {
+      "name": "outlook_whoami",
+      "description": "Return the current Outlook profile user and the list of mail accounts.",
+      "source": "src/outlook_mcp/tools/account.py",
+      "annotations": {
+        "title": "Show current Outlook user and accounts",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "response_format": {
+            "type": "string",
+            "default": "markdown",
+            "description": "'markdown' or 'json'."
+          }
+        },
+        "required": []
+      },
+      "uiResource": null,
+      "returnContract": {
+        "returnAnnotation": "str",
+        "successEnvelope": "MCP text content from string return",
+        "textFormat": "markdown or json (default markdown)",
+        "structuredContent": false,
+        "payloadShapeVerified": false
+      }
+    }
+  ]
+}

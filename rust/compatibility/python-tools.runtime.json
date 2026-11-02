@@ -1,0 +1,1812 @@
+{
+  "provenance": "Local FastMCP registration; no COM initialized or mail accessed",
+  "toolCount": 31,
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Mark Outlook task complete"
+      },
+      "description": "Mark a task as 100% complete.",
+      "inputSchema": {
+        "properties": {
+          "entry_id": {
+            "description": "EntryID of the task.",
+            "title": "Entry Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "title": "outlook_complete_taskArguments",
+        "type": "object"
+      },
+      "name": "outlook_complete_task",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_complete_taskOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Create Outlook calendar event"
+      },
+      "description": "Create a calendar event or meeting invite.",
+      "inputSchema": {
+        "$defs": {
+          "Recurrence": {
+            "description": "Recurrence pattern for calendar events.\n\n``type`` is the cadence; ``interval`` is the spacing (every N days /\nweeks / months / years). Provide either ``occurrences`` or\n``end_date`` to bound the series — if both are omitted the pattern\nruns indefinitely.",
+            "properties": {
+              "end_date": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "ISO-8601 date for series end (alternative to occurrences).",
+                "title": "End Date"
+              },
+              "interval": {
+                "default": 1,
+                "description": "Every N units (days/weeks/months/years).",
+                "minimum": 1,
+                "title": "Interval",
+                "type": "integer"
+              },
+              "occurrences": {
+                "anyOf": [
+                  {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "End after N occurrences.",
+                "title": "Occurrences"
+              },
+              "type": {
+                "description": "Cadence: daily, weekly, monthly, or yearly.",
+                "enum": [
+                  "daily",
+                  "weekly",
+                  "monthly",
+                  "yearly"
+                ],
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "Recurrence",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "attendees": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Email addresses. Adding any attendee turns this into a meeting.",
+            "title": "Attendees"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Body"
+          },
+          "end": {
+            "description": "ISO-8601 end time.",
+            "title": "End",
+            "type": "string"
+          },
+          "is_online_meeting": {
+            "default": false,
+            "title": "Is Online Meeting",
+            "type": "boolean"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location"
+          },
+          "recurrence": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Recurrence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Recurrence pattern. Omit for a single occurrence."
+          },
+          "reminder_minutes": {
+            "anyOf": [
+              {
+                "maximum": 10080,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 15,
+            "title": "Reminder Minutes"
+          },
+          "start": {
+            "description": "ISO-8601 start time (e.g. '2026-05-01T14:00:00').",
+            "title": "Start",
+            "type": "string"
+          },
+          "subject": {
+            "description": "Event subject.",
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "start",
+          "end"
+        ],
+        "title": "outlook_create_eventArguments",
+        "type": "object"
+      },
+      "name": "outlook_create_event",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_create_eventOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Create Outlook folder"
+      },
+      "description": "Create a sub-folder under the given parent.",
+      "inputSchema": {
+        "properties": {
+          "name": {
+            "description": "Name of the new folder.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parent": {
+            "default": "inbox",
+            "description": "Parent folder. Defaults to inbox.",
+            "title": "Parent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "outlook_create_folderArguments",
+        "type": "object"
+      },
+      "name": "outlook_create_folder",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_create_folderOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Create Outlook task"
+      },
+      "description": "Create a new task in the default Tasks folder.",
+      "inputSchema": {
+        "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Body"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 date/datetime.",
+            "title": "Due Date"
+          },
+          "importance": {
+            "default": "normal",
+            "description": "low/normal/high.",
+            "title": "Importance",
+            "type": "string"
+          },
+          "reminder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 reminder time.",
+            "title": "Reminder"
+          },
+          "subject": {
+            "description": "Task subject.",
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject"
+        ],
+        "title": "outlook_create_taskArguments",
+        "type": "object"
+      },
+      "name": "outlook_create_task",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_create_taskOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Delete Outlook calendar event"
+      },
+      "description": "Delete a calendar event (sends cancellation if it has attendees).",
+      "inputSchema": {
+        "properties": {
+          "entry_id": {
+            "description": "EntryID of the event.",
+            "title": "Entry Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "title": "outlook_delete_eventArguments",
+        "type": "object"
+      },
+      "name": "outlook_delete_event",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_delete_eventOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Delete Outlook mail (move to Deleted Items)"
+      },
+      "description": "Delete a mail (Outlook moves it to Deleted Items).",
+      "inputSchema": {
+        "properties": {
+          "entry_id": {
+            "description": "EntryID of the mail to delete.",
+            "title": "Entry Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "title": "outlook_delete_mailArguments",
+        "type": "object"
+      },
+      "name": "outlook_delete_mail",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_delete_mailOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Forward Outlook mail"
+      },
+      "description": "Forward an existing mail with an optional added note.",
+      "inputSchema": {
+        "properties": {
+          "body": {
+            "default": "",
+            "description": "Optional note above the forwarded mail.",
+            "title": "Body",
+            "type": "string"
+          },
+          "cc": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "CC recipients.",
+            "title": "Cc"
+          },
+          "entry_id": {
+            "description": "EntryID of the mail to forward.",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "html": {
+            "default": false,
+            "description": "Treat body as HTML.",
+            "title": "Html",
+            "type": "boolean"
+          },
+          "to": {
+            "description": "Forward recipients.",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "To",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entry_id",
+          "to"
+        ],
+        "title": "outlook_forward_mailArguments",
+        "type": "object"
+      },
+      "name": "outlook_forward_mail",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_forward_mailOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Get Outlook contact"
+      },
+      "description": "Fetch full details for one contact.",
+      "inputSchema": {
+        "properties": {
+          "entry_id": {
+            "description": "EntryID of the contact.",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "title": "outlook_get_contactArguments",
+        "type": "object"
+      },
+      "name": "outlook_get_contact",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_get_contactOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Get Outlook calendar event"
+      },
+      "description": "Fetch an event with attendees, body, and recurrence info.",
+      "inputSchema": {
+        "properties": {
+          "entry_id": {
+            "description": "EntryID of the event.",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "title": "outlook_get_eventArguments",
+        "type": "object"
+      },
+      "name": "outlook_get_event"
+    },
+    {
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://outlook/mail-view.html"
+        }
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Get full Outlook mail"
+      },
+      "description": "Fetch body, headers, and attachment list for one mail item.\n\n        If the response has body_truncated=true, re-call with a higher\n        max_body_chars to read more.\n        ",
+      "inputSchema": {
+        "properties": {
+          "entry_id": {
+            "description": "EntryID of the mail item.",
+            "minLength": 1,
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "include_body": {
+            "default": true,
+            "description": "Include the plain-text body.",
+            "title": "Include Body",
+            "type": "boolean"
+          },
+          "include_html": {
+            "default": false,
+            "description": "Also include the raw HTML body. Off by default — it is usually huge and rarely needed; the plain-text body carries the same content.",
+            "title": "Include Html",
+            "type": "boolean"
+          },
+          "max_body_chars": {
+            "default": 10000,
+            "description": "Truncate the body beyond this many chars (0 = no limit).",
+            "minimum": 0,
+            "title": "Max Body Chars",
+            "type": "integer"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "title": "outlook_get_mailArguments",
+        "type": "object"
+      },
+      "name": "outlook_get_mail"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "Check Out-of-Office (auto-reply) status"
+      },
+      "description": "Check whether Out-of-Office auto-reply is currently enabled.",
+      "inputSchema": {
+        "properties": {
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          }
+        },
+        "title": "outlook_get_out_of_officeArguments",
+        "type": "object"
+      },
+      "name": "outlook_get_out_of_office",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_get_out_of_officeOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List Outlook color categories"
+      },
+      "description": "List the color categories configured in this Outlook profile.",
+      "inputSchema": {
+        "properties": {
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          }
+        },
+        "title": "outlook_list_categoriesArguments",
+        "type": "object"
+      },
+      "name": "outlook_list_categories",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_list_categoriesOutput",
+        "type": "object"
+      }
+    },
+    {
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://outlook/contacts.html"
+        }
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List Outlook contacts"
+      },
+      "description": "List saved contacts from every contact folder in every store.\n\n        Note: on corporate accounts the personal contact folders are often\n        nearly empty — colleagues live in the directory instead. Use\n        outlook_search_contacts (which also searches the directory) to\n        find people.\n        ",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          }
+        },
+        "title": "outlook_list_contactsArguments",
+        "type": "object"
+      },
+      "name": "outlook_list_contacts"
+    },
+    {
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://outlook/calendar.html"
+        }
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List Outlook calendar events"
+      },
+      "description": "List calendar events in a date range, including recurring instances.",
+      "inputSchema": {
+        "properties": {
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 end of range. Defaults to start+14d.",
+            "title": "End"
+          },
+          "include_recurrences": {
+            "default": true,
+            "title": "Include Recurrences",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 start of range. Defaults to now.",
+            "title": "Start"
+          }
+        },
+        "title": "outlook_list_eventsArguments",
+        "type": "object"
+      },
+      "name": "outlook_list_events"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List Outlook folders"
+      },
+      "description": "List the folder tree with item and unread counts.",
+      "inputSchema": {
+        "properties": {
+          "max_depth": {
+            "default": 4,
+            "maximum": 10,
+            "minimum": 1,
+            "title": "Max Depth",
+            "type": "integer"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          },
+          "root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Folder to start from. Defaults to default mail store root.",
+            "title": "Root"
+          }
+        },
+        "title": "outlook_list_foldersArguments",
+        "type": "object"
+      },
+      "name": "outlook_list_folders",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_list_foldersOutput",
+        "type": "object"
+      }
+    },
+    {
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://outlook/mail-list.html"
+        }
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List Outlook mails"
+      },
+      "description": "List mail items from a folder, newest first.",
+      "inputSchema": {
+        "properties": {
+          "folder": {
+            "default": "inbox",
+            "description": "Folder name. Either a well-known name (inbox, sent, drafts, deleted, junk) or a path like 'Inbox/Projects/Quinn'.",
+            "title": "Folder",
+            "type": "string"
+          },
+          "from_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Substring match on sender email.",
+            "title": "From Address"
+          },
+          "limit": {
+            "default": 25,
+            "description": "Max items.",
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "description": "Pagination offset.",
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 lower bound on ReceivedTime.",
+            "title": "Since"
+          },
+          "unread_only": {
+            "default": false,
+            "description": "Return only unread.",
+            "title": "Unread Only",
+            "type": "boolean"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "ISO-8601 upper bound on ReceivedTime.",
+            "title": "Until"
+          }
+        },
+        "title": "outlook_list_mailsArguments",
+        "type": "object"
+      },
+      "name": "outlook_list_mails"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List Outlook mail rules"
+      },
+      "description": "List all mail rules with their enabled status.",
+      "inputSchema": {
+        "properties": {
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          }
+        },
+        "title": "outlook_list_rulesArguments",
+        "type": "object"
+      },
+      "name": "outlook_list_rules",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_list_rulesOutput",
+        "type": "object"
+      }
+    },
+    {
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://outlook/tasks.html"
+        }
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List Outlook tasks"
+      },
+      "description": "List tasks (to-dos). By default only incomplete tasks are returned.",
+      "inputSchema": {
+        "properties": {
+          "include_completed": {
+            "default": false,
+            "title": "Include Completed",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          }
+        },
+        "title": "outlook_list_tasksArguments",
+        "type": "object"
+      },
+      "name": "outlook_list_tasks"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Mark Outlook mail read/unread or flag it"
+      },
+      "description": "Toggle read state and/or follow-up flag on a mail.",
+      "inputSchema": {
+        "properties": {
+          "entry_id": {
+            "description": "EntryID of the mail.",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "flagged": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "True=flag for follow-up, False=clear flag.",
+            "title": "Flagged"
+          },
+          "read": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "True=mark read, False=unread, None=no change.",
+            "title": "Read"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "title": "outlook_mark_mailArguments",
+        "type": "object"
+      },
+      "name": "outlook_mark_mail",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_mark_mailOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Move Outlook mail to folder"
+      },
+      "description": "Move a mail to another folder. Returns the new EntryID.",
+      "inputSchema": {
+        "properties": {
+          "entry_id": {
+            "description": "EntryID of the mail to move.",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "target_folder": {
+            "description": "Destination folder.",
+            "title": "Target Folder",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "target_folder"
+        ],
+        "title": "outlook_move_mailArguments",
+        "type": "object"
+      },
+      "name": "outlook_move_mail",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_move_mailOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Reply to Outlook mail"
+      },
+      "description": "Reply (or reply-all) to an existing mail.",
+      "inputSchema": {
+        "properties": {
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Files to attach.",
+            "title": "Attachments"
+          },
+          "body": {
+            "description": "Reply body. Quoted original is appended.",
+            "title": "Body",
+            "type": "string"
+          },
+          "entry_id": {
+            "description": "EntryID of the mail to reply to.",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "html": {
+            "default": false,
+            "description": "Treat body as HTML.",
+            "title": "Html",
+            "type": "boolean"
+          },
+          "reply_all": {
+            "default": false,
+            "description": "Reply to all recipients.",
+            "title": "Reply All",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entry_id",
+          "body"
+        ],
+        "title": "outlook_reply_mailArguments",
+        "type": "object"
+      },
+      "name": "outlook_reply_mail",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_reply_mailOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Resolve a name to an email address"
+      },
+      "description": "Resolve a name against the address book/directory to its SMTP address.\n\n        Use before sending when you only know a person's name. Ambiguous\n        names won't resolve — fall back to outlook_search_contacts.\n        ",
+      "inputSchema": {
+        "properties": {
+          "name": {
+            "description": "Display name, alias, or address to resolve (like Ctrl+K in Outlook).",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "outlook_resolve_nameArguments",
+        "type": "object"
+      },
+      "name": "outlook_resolve_name",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_resolve_nameOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Respond to a meeting invite"
+      },
+      "description": "Accept / tentatively accept / decline a meeting invite.",
+      "inputSchema": {
+        "properties": {
+          "entry_id": {
+            "description": "EntryID of the meeting.",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "response": {
+            "description": "One of: 'accept', 'tentative', 'decline'.",
+            "title": "Response",
+            "type": "string"
+          },
+          "send_response": {
+            "default": true,
+            "title": "Send Response",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entry_id",
+          "response"
+        ],
+        "title": "outlook_respond_eventArguments",
+        "type": "object"
+      },
+      "name": "outlook_respond_event",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_respond_eventOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Save Outlook mail attachments to disk"
+      },
+      "description": "Save one or all attachments from a mail to a local directory.",
+      "inputSchema": {
+        "properties": {
+          "attachment_index": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "1-indexed attachment. Omit to save all.",
+            "title": "Attachment Index"
+          },
+          "entry_id": {
+            "description": "EntryID of the mail.",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "output_dir": {
+            "description": "Absolute directory under your user profile.",
+            "title": "Output Dir",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "output_dir"
+        ],
+        "title": "outlook_save_attachmentsArguments",
+        "type": "object"
+      },
+      "name": "outlook_save_attachments",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_save_attachmentsOutput",
+        "type": "object"
+      }
+    },
+    {
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://outlook/contacts.html"
+        }
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Search Outlook contacts"
+      },
+      "description": "Search saved contacts and (by default) the org directory.",
+      "inputSchema": {
+        "properties": {
+          "include_directory": {
+            "default": true,
+            "description": "Also search the org directory (Exchange Global Address List). Can take a few seconds on large directories.",
+            "title": "Include Directory",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 25,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "description": "Search words; all must match (name, email, company, or title).",
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "outlook_search_contactsArguments",
+        "type": "object"
+      },
+      "name": "outlook_search_contacts"
+    },
+    {
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://outlook/mail-list.html"
+        }
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Search Outlook mails"
+      },
+      "description": "Search a mail folder by subject, body, or sender.",
+      "inputSchema": {
+        "properties": {
+          "folder": {
+            "default": "inbox",
+            "description": "Folder to search in.",
+            "title": "Folder",
+            "type": "string"
+          },
+          "limit": {
+            "default": 25,
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "description": "Search keywords or DASL filter.",
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          },
+          "scope": {
+            "default": "subject_body",
+            "description": "Where to look: 'subject_body' (default), 'subject', 'from', or 'dasl' to pass `query` as a raw DASL @SQL filter.",
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "outlook_search_mailsArguments",
+        "type": "object"
+      },
+      "name": "outlook_search_mails"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Send Outlook mail"
+      },
+      "description": "Compose and send a new mail. Set save_only=True to save to Drafts.",
+      "inputSchema": {
+        "properties": {
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Absolute paths to local files.",
+            "title": "Attachments"
+          },
+          "bcc": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "BCC recipients.",
+            "title": "Bcc"
+          },
+          "body": {
+            "description": "Message body. Plain text unless html=True.",
+            "title": "Body",
+            "type": "string"
+          },
+          "cc": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "CC recipients.",
+            "title": "Cc"
+          },
+          "html": {
+            "default": false,
+            "description": "Treat body as HTML.",
+            "title": "Html",
+            "type": "boolean"
+          },
+          "importance": {
+            "default": "normal",
+            "description": "One of: 'low', 'normal', 'high'.",
+            "title": "Importance",
+            "type": "string"
+          },
+          "save_only": {
+            "default": false,
+            "description": "If true, save to Drafts instead of sending.",
+            "title": "Save Only",
+            "type": "boolean"
+          },
+          "subject": {
+            "description": "Subject line.",
+            "title": "Subject",
+            "type": "string"
+          },
+          "to": {
+            "description": "Recipient addresses.",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "To",
+            "type": "array"
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ],
+        "title": "outlook_send_mailArguments",
+        "type": "object"
+      },
+      "name": "outlook_send_mail",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_send_mailOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Set categories on a mail / event / task"
+      },
+      "description": "Replace the categories on an item (mail / event / task).",
+      "inputSchema": {
+        "properties": {
+          "categories": {
+            "description": "Comma-separated category names (e.g. 'Important' or 'Work, Follow-up'). Empty string clears all categories.",
+            "title": "Categories",
+            "type": "string"
+          },
+          "entry_id": {
+            "description": "EntryID of the item.",
+            "title": "Entry Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "categories"
+        ],
+        "title": "outlook_set_categoryArguments",
+        "type": "object"
+      },
+      "name": "outlook_set_category",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_set_categoryOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Enable or disable a mail rule"
+      },
+      "description": "Enable or disable a mail rule by name. Modifies live mail rules.",
+      "inputSchema": {
+        "properties": {
+          "enabled": {
+            "description": "True to enable, False to disable.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "rule_name": {
+            "description": "Exact rule name (use outlook_list_rules).",
+            "minLength": 1,
+            "title": "Rule Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_name",
+          "enabled"
+        ],
+        "title": "outlook_toggle_ruleArguments",
+        "type": "object"
+      },
+      "name": "outlook_toggle_rule",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_toggle_ruleOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Update Outlook calendar event"
+      },
+      "description": "Update fields on an existing event. Only non-null fields are written.",
+      "inputSchema": {
+        "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Body"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "End"
+          },
+          "entry_id": {
+            "description": "EntryID of the event.",
+            "title": "Entry Id",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Start"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "title": "outlook_update_eventArguments",
+        "type": "object"
+      },
+      "name": "outlook_update_event",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_update_eventOutput",
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Show current Outlook user and accounts"
+      },
+      "description": "Return the current Outlook profile user and the list of mail accounts.",
+      "inputSchema": {
+        "properties": {
+          "response_format": {
+            "default": "markdown",
+            "description": "'markdown' or 'json'.",
+            "title": "Response Format",
+            "type": "string"
+          }
+        },
+        "title": "outlook_whoamiArguments",
+        "type": "object"
+      },
+      "name": "outlook_whoami",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "outlook_whoamiOutput",
+        "type": "object"
+      }
+    }
+  ]
+}

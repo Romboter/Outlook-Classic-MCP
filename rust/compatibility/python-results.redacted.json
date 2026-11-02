@@ -1,0 +1,688 @@
+{
+  "format": "outlook-python-source-result-contracts-v1",
+  "source": "src/outlook_mcp/client/ and src/outlook_mcp/tools/",
+  "provenance": "Source-derived field inventory and synthetic redacted examples; NOT executed Outlook COM results, and NOT exhaustive/strict JSON Schemas. Conditional fields/branches may vary; verify on an isolated test mailbox.",
+  "toolCount": 31,
+  "tools": [
+    {
+      "name": "outlook_complete_task",
+      "pythonClient": "tasks.complete_task",
+      "topLevelKeys": [
+        "status",
+        "entry_id"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "entry_id": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_create_event",
+      "pythonClient": "calendar.create_event",
+      "topLevelKeys": [
+        "status",
+        "entry_id",
+        "subject",
+        "start",
+        "end"
+      ],
+      "itemKeys": [],
+      "notes": "Event creation can send an invitation when attendees are supplied",
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "entry_id": "[REDACTED]",
+        "subject": "[REDACTED]",
+        "start": "[REDACTED]",
+        "end": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_create_folder",
+      "pythonClient": "folders.create_folder",
+      "topLevelKeys": [
+        "name",
+        "path",
+        "entry_id"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "name": "[REDACTED]",
+        "path": "[REDACTED]",
+        "entry_id": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_create_task",
+      "pythonClient": "tasks.create_task",
+      "topLevelKeys": [
+        "status",
+        "entry_id",
+        "subject"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "entry_id": "[REDACTED]",
+        "subject": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_delete_event",
+      "pythonClient": "calendar.delete_event",
+      "topLevelKeys": [
+        "status",
+        "subject",
+        "entry_id"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "subject": "[REDACTED]",
+        "entry_id": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_delete_mail",
+      "pythonClient": "mail.delete_mail",
+      "topLevelKeys": [
+        "status",
+        "subject",
+        "entry_id"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "subject": "[REDACTED]",
+        "entry_id": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_forward_mail",
+      "pythonClient": "mail.forward_mail",
+      "topLevelKeys": [
+        "status",
+        "forwarded",
+        "to",
+        "subject"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "forwarded": "[REDACTED]",
+        "to": [],
+        "subject": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_get_contact",
+      "pythonClient": "contacts.get_contact",
+      "topLevelKeys": [
+        "entry_id",
+        "full_name",
+        "email",
+        "company",
+        "job_title",
+        "mobile",
+        "business_phone",
+        "home_phone",
+        "address",
+        "notes"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "entry_id": "[REDACTED]",
+        "full_name": "[REDACTED]",
+        "email": "[REDACTED]",
+        "company": "[REDACTED]",
+        "job_title": "[REDACTED]",
+        "mobile": "[REDACTED]",
+        "business_phone": "[REDACTED]",
+        "home_phone": "[REDACTED]",
+        "address": "[REDACTED]",
+        "notes": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_get_event",
+      "pythonClient": "calendar.get_event",
+      "topLevelKeys": [
+        "entry_id",
+        "subject",
+        "start",
+        "end",
+        "location",
+        "organizer",
+        "is_recurring",
+        "all_day",
+        "preview",
+        "body",
+        "attendees",
+        "reminder_minutes",
+        "categories"
+      ],
+      "itemKeys": [
+        "name",
+        "address",
+        "type",
+        "response"
+      ],
+      "notes": "itemKeys lists attendee keys",
+      "redactedFixture": {
+        "entry_id": "[REDACTED]",
+        "subject": "[REDACTED]",
+        "start": "[REDACTED]",
+        "end": "[REDACTED]",
+        "location": "[REDACTED]",
+        "organizer": "[REDACTED]",
+        "is_recurring": "[REDACTED]",
+        "all_day": "[REDACTED]",
+        "preview": "[REDACTED]",
+        "body": "[REDACTED]",
+        "attendees": [],
+        "reminder_minutes": 0,
+        "categories": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_get_mail",
+      "pythonClient": "mail.get_mail",
+      "topLevelKeys": [
+        "entry_id",
+        "conversation_id",
+        "subject",
+        "from",
+        "from_address",
+        "to",
+        "cc",
+        "bcc",
+        "received",
+        "sent",
+        "unread",
+        "flagged",
+        "importance",
+        "categories",
+        "attachments",
+        "body",
+        "body_truncated",
+        "body_total_chars",
+        "html_body"
+      ],
+      "itemKeys": [
+        "index",
+        "filename",
+        "size_bytes"
+      ],
+      "notes": "body/html_body and truncation fields are conditional; itemKeys lists attachment keys",
+      "redactedFixture": {
+        "entry_id": "[REDACTED]",
+        "conversation_id": "[REDACTED]",
+        "subject": "[REDACTED]",
+        "from": "[REDACTED]",
+        "from_address": "[REDACTED]",
+        "to": [],
+        "cc": [],
+        "bcc": [],
+        "received": "[REDACTED]",
+        "sent": "[REDACTED]",
+        "unread": false,
+        "flagged": false,
+        "importance": "[REDACTED]",
+        "categories": "[REDACTED]",
+        "attachments": [],
+        "body": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_get_out_of_office",
+      "pythonClient": "ooo.get_out_of_office",
+      "topLevelKeys": [
+        "out_of_office",
+        "status",
+        "note"
+      ],
+      "itemKeys": [],
+      "notes": "Shape varies by account/provider branch",
+      "redactedFixture": {
+        "out_of_office": false,
+        "status": "[REDACTED_STATUS]",
+        "note": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_list_categories",
+      "pythonClient": "categories.list_categories",
+      "topLevelKeys": [
+        "count",
+        "items"
+      ],
+      "itemKeys": [
+        "name",
+        "color"
+      ],
+      "redactedFixture": {
+        "count": 0,
+        "items": []
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_list_contacts",
+      "pythonClient": "contacts.list_contacts",
+      "topLevelKeys": [
+        "count",
+        "offset",
+        "items",
+        "has_more"
+      ],
+      "itemKeys": [
+        "entry_id",
+        "full_name",
+        "email",
+        "company",
+        "job_title",
+        "mobile",
+        "folder"
+      ],
+      "redactedFixture": {
+        "count": 0,
+        "offset": 0,
+        "items": [],
+        "has_more": false
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_list_events",
+      "pythonClient": "calendar.list_events",
+      "topLevelKeys": [
+        "start",
+        "end",
+        "count",
+        "items"
+      ],
+      "itemKeys": [
+        "entry_id",
+        "subject",
+        "start",
+        "end",
+        "location",
+        "organizer",
+        "is_recurring",
+        "all_day",
+        "preview"
+      ],
+      "redactedFixture": {
+        "start": "[REDACTED]",
+        "end": "[REDACTED]",
+        "count": 0,
+        "items": []
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_list_folders",
+      "pythonClient": "folders.list_folders",
+      "topLevelKeys": [
+        "count",
+        "items"
+      ],
+      "itemKeys": [
+        "name",
+        "path",
+        "item_count",
+        "unread_count",
+        "default_item_type"
+      ],
+      "notes": "Tool wrapper creates count/items around the client's list",
+      "redactedFixture": {
+        "count": 0,
+        "items": []
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_list_mails",
+      "pythonClient": "mail.list_mails",
+      "topLevelKeys": [
+        "folder",
+        "count",
+        "offset",
+        "limit",
+        "items",
+        "has_more",
+        "next_offset"
+      ],
+      "itemKeys": [
+        "entry_id",
+        "subject",
+        "from",
+        "from_address",
+        "to",
+        "received",
+        "unread",
+        "flagged",
+        "has_attachments",
+        "importance",
+        "preview"
+      ],
+      "notes": "next_offset is conditional",
+      "redactedFixture": {
+        "folder": "[REDACTED]",
+        "count": 0,
+        "offset": 0,
+        "limit": 0,
+        "items": [],
+        "has_more": false
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_list_rules",
+      "pythonClient": "rules.list_rules",
+      "topLevelKeys": [
+        "count",
+        "items"
+      ],
+      "itemKeys": [
+        "index",
+        "name",
+        "enabled"
+      ],
+      "redactedFixture": {
+        "count": 0,
+        "items": []
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_list_tasks",
+      "pythonClient": "tasks.list_tasks",
+      "topLevelKeys": [
+        "count",
+        "items"
+      ],
+      "itemKeys": [
+        "entry_id",
+        "subject",
+        "due_date",
+        "start_date",
+        "complete",
+        "percent_complete",
+        "importance",
+        "status"
+      ],
+      "redactedFixture": {
+        "count": 0,
+        "items": []
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_mark_mail",
+      "pythonClient": "mail.mark_mail",
+      "topLevelKeys": [
+        "status",
+        "entry_id",
+        "unread",
+        "flagged"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "entry_id": "[REDACTED]",
+        "unread": false,
+        "flagged": false
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_move_mail",
+      "pythonClient": "mail.move_mail",
+      "topLevelKeys": [
+        "status",
+        "new_entry_id",
+        "folder"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "new_entry_id": "[REDACTED]",
+        "folder": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_reply_mail",
+      "pythonClient": "mail.reply_mail",
+      "topLevelKeys": [
+        "status",
+        "reply_all",
+        "in_reply_to",
+        "subject"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "reply_all": "[REDACTED]",
+        "in_reply_to": "[REDACTED]",
+        "subject": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_resolve_name",
+      "pythonClient": "contacts.resolve_name",
+      "topLevelKeys": [
+        "resolved",
+        "query",
+        "note",
+        "display_name",
+        "smtp_address"
+      ],
+      "itemKeys": [],
+      "notes": "Resolved and unresolved results have different fields",
+      "redactedFixture": {
+        "resolved": true,
+        "query": "[REDACTED]",
+        "display_name": "[REDACTED]",
+        "smtp_address": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_respond_event",
+      "pythonClient": "calendar.respond_event",
+      "topLevelKeys": [
+        "status",
+        "response"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "response": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_save_attachments",
+      "pythonClient": "mail.save_attachments",
+      "topLevelKeys": [
+        "status",
+        "count",
+        "files",
+        "output_dir"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "count": 0,
+        "files": [],
+        "output_dir": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_search_contacts",
+      "pythonClient": "contacts.search_contacts",
+      "topLevelKeys": [
+        "query",
+        "count",
+        "items",
+        "searched_directory"
+      ],
+      "itemKeys": [
+        "entry_id",
+        "full_name",
+        "email",
+        "company",
+        "job_title",
+        "mobile",
+        "folder",
+        "source"
+      ],
+      "notes": "Directory rows may have no EntryID",
+      "redactedFixture": {
+        "query": "[REDACTED]",
+        "count": 0,
+        "items": [],
+        "searched_directory": false
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_search_mails",
+      "pythonClient": "mail.search_mails",
+      "topLevelKeys": [
+        "query",
+        "scope",
+        "folder",
+        "count",
+        "items"
+      ],
+      "itemKeys": [
+        "entry_id",
+        "subject",
+        "from",
+        "from_address",
+        "to",
+        "received",
+        "unread",
+        "flagged",
+        "has_attachments",
+        "importance",
+        "preview"
+      ],
+      "redactedFixture": {
+        "query": "[REDACTED]",
+        "scope": "[REDACTED]",
+        "folder": "[REDACTED]",
+        "count": 0,
+        "items": []
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_send_mail",
+      "pythonClient": "mail.send_mail",
+      "topLevelKeys": [
+        "status",
+        "entry_id",
+        "subject",
+        "to",
+        "cc",
+        "bcc"
+      ],
+      "itemKeys": [],
+      "notes": "Two exclusive shapes: save_only (status saved_to_drafts, entry_id, subject) or send (status sent, to, cc, bcc, subject)",
+      "redactedFixture": {
+        "status": "sent",
+        "subject": "[REDACTED]",
+        "to": [],
+        "cc": [],
+        "bcc": []
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_set_category",
+      "pythonClient": "categories.set_category",
+      "topLevelKeys": [
+        "status",
+        "entry_id",
+        "subject",
+        "categories"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "entry_id": "[REDACTED]",
+        "subject": "[REDACTED]",
+        "categories": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_toggle_rule",
+      "pythonClient": "rules.toggle_rule",
+      "topLevelKeys": [
+        "status",
+        "rule",
+        "enabled"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "rule": "[REDACTED]",
+        "enabled": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_update_event",
+      "pythonClient": "calendar.update_event",
+      "topLevelKeys": [
+        "status",
+        "entry_id"
+      ],
+      "itemKeys": [],
+      "redactedFixture": {
+        "status": "[REDACTED_STATUS]",
+        "entry_id": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    },
+    {
+      "name": "outlook_whoami",
+      "pythonClient": "account.whoami",
+      "topLevelKeys": [
+        "current_user",
+        "accounts",
+        "local_time",
+        "timezone",
+        "utc_offset"
+      ],
+      "itemKeys": [],
+      "notes": "Account list item shapes need runtime confirmation",
+      "redactedFixture": {
+        "current_user": "[REDACTED]",
+        "accounts": [],
+        "local_time": "[REDACTED]",
+        "timezone": "[REDACTED]",
+        "utc_offset": "[REDACTED]"
+      },
+      "verifiedAgainstLiveOutlook": false
+    }
+  ]
+}

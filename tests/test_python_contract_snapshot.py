@@ -73,12 +73,15 @@ class PythonContractSnapshotTests(unittest.TestCase):
         for item in self.results["tools"]:
             self.assertFalse(item["verifiedAgainstLiveOutlook"])
             self.assertIsInstance(item["redactedFixture"], dict)
-            self.assertEqual(
-                set(item["topLevelKeys"]),
-                set(item["redactedFixture"]) |
-                # Field omissions are documented conditional cases, not synthetic data.
-                (set(item["topLevelKeys"]) - set(item["redactedFixture"])),
-            )
+            fixture_keys = set(item["redactedFixture"])
+            self.assertTrue(fixture_keys <= set(item["topLevelKeys"]))
+            conditional = {
+                "outlook_get_mail": {"body_truncated", "body_total_chars", "html_body"},
+                "outlook_send_mail": {"entry_id"},
+                "outlook_resolve_name": {"note"},
+                "outlook_list_mails": {"next_offset"},
+            }.get(item["name"], set())
+            self.assertEqual(set(item["topLevelKeys"]) - fixture_keys, conditional)
             for key, value in item["redactedFixture"].items():
                 if any(term in key for term in sensitive_keys):
                     if isinstance(value, str):

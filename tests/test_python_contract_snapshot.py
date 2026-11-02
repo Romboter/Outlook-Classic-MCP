@@ -45,7 +45,7 @@ class PythonContractSnapshotTests(unittest.TestCase):
 
     def test_captured_runtime_metadata_is_not_lossy_unicode(self):
         self.assertNotIn("\uFFFD", RUNTIME.read_text(encoding="utf-8"))
-        
+
     def test_static_schema_stays_in_sync_with_python_sources(self):
         self.assertEqual(compare_static(self.declarations), [])
 
@@ -82,6 +82,43 @@ class PythonContractSnapshotTests(unittest.TestCase):
         self.assertFalse(self.tools["outlook_toggle_rule"]["annotations"]["readOnlyHint"])
         self.assertTrue(self.tools["outlook_whoami"]["annotations"]["readOnlyHint"])
 
+    def test_owner_reported_sta_evidence_is_scoped_to_client_functions(self):
+        evidence = self.results["liveEvidence"]
+        self.assertEqual(evidence["toolCalls"], 15)
+        self.assertIn("not FastMCP", evidence["execution"])
+        tools = {tool["name"]: tool for tool in self.results["tools"]}
+        observed = [tool for tool in tools.values() if tool["clientResultKeysObservedLive"]]
+        self.assertEqual(len(observed), 15)
+        for tool in observed:
+            report = tool["ownerReportedLive"]
+            self.assertEqual(report["status"], "client_keys_match_source_inventory")
+            self.assertFalse(report["toolWrapperExercised"])
+            self.assertGreater(report["elapsed_ms"], 0)
+            self.assertFalse(tool["verifiedAgainstLiveOutlook"])
+
+        whoami = tools["outlook_whoami"]
+        self.assertEqual(
+            whoami["itemKeys"],
+            ["display_name", "smtp_address", "user_name", "account_type"],
+        )
+        self.assertEqual(
+            whoami["ownerReportedLive"]["itemTypes"]["account_type"], "integer"
+        )
+        self.assertEqual(
+            tools["outlook_get_event"]["ownerReportedLive"]["itemTypes"]["response"],
+            "integer",
+        )
+        self.assertEqual(
+            tools["outlook_list_categories"]["ownerReportedLive"]["itemTypes"]["color"],
+            "integer",
+        )
+        oof = tools["outlook_get_out_of_office"]
+        self.assertEqual(oof["conditionalTopLevelKeys"], ["note"])
+        self.assertNotIn("note", oof["redactedFixture"])
+        self.assertEqual(
+            oof["ownerReportedLive"]["keyTypes"]["out_of_office"], "boolean"
+        )
+
     def test_fixtures_contain_only_explicit_placeholders(self):
         sensitive_keys = ("entry_id", "new_entry_id", "in_reply_to", "forwarded",
                           "subject", "body", "email", "address", "query", "name")
@@ -95,6 +132,7 @@ class PythonContractSnapshotTests(unittest.TestCase):
                 "outlook_send_mail": {"entry_id"},
                 "outlook_resolve_name": {"note"},
                 "outlook_list_mails": {"next_offset"},
+                "outlook_get_out_of_office": {"note"},
             }.get(item["name"], set())
             self.assertEqual(set(item["topLevelKeys"]) - fixture_keys, conditional)
             for key, value in item["redactedFixture"].items():

@@ -44,9 +44,6 @@ jobs:
           python-version: '3.12'
       - name: Install Python tool-registration dependencies
         run: python -m pip install -e .
-      - name: Compare actual FastMCP tool metadata without starting Outlook
-        run: python scripts/verify_python_contract_snapshot.py --runtime
-
       - name: Capture registered FastMCP contract without Outlook
         run: python scripts/verify_python_contract_snapshot.py --capture-runtime
       - name: Emit source-only registration metadata for snapshot review
@@ -64,3 +61,5 @@ jobs:
           for offset in range(0, len(content), 5000):
               print(f"RUNTIME_METADATA_PART:{offset//5000:04d}:{content[offset:offset+5000]}")
           PY
+      - name: Compare actual FastMCP metadata against checked-in snapshot
+        run: python scripts/verify_python_contract_snapshot.py --runtime

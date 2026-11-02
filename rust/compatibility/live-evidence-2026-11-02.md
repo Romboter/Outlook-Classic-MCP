@@ -54,7 +54,7 @@ The Python calls below executed `client/*` functions through the real `OutlookBr
 2. **Handle stability (#6).** The owner observed the same message with different `mN` handles across legacy and indexed searches, and with yet another handle when returned as the thread anchor. The in-memory cache keys by exact `(EntryID, StoreID)` strings. Potential causes include different COM identity encodings or different MCP process sessions; neither is proven. Test all backends in **one persistent MCP session** before modifying aliasing. Do not deduplicate by EntryID alone without verifying store identity.
 3. **Indexed latency (#5).** Approximately 10.97 s indexed vs. 3.03 s legacy in this one case; remain opt-in. Include cold/warm runs and full search semantics when benchmarking.
 4. **Result parity (#4/#9).** Prioritize Python-compatible `whoami`, complete selected-mail metadata and date representation, with capped context sizes; preserve intentionally stricter Rust security defaults.
-5. **Unverified conditional shapes (#2).** FastMCP wrapper envelopes, actual attached-file item fields, directory/GAL rows, unresolved name output and OOF exception `note` branch have not been live-tested.
+5. **Conditional shapes (#2).** Four FastMCP wrapper tools and representative envelope paths were subsequently live-tested (see follow-up below); attached-file element fields, empty list, directory/GAL rows, unresolved names, OOF exception `note`, and markdown for whoami/folders remain unverified.
 
 ## Suggested verification, still pending
 
@@ -63,7 +63,28 @@ Use one long-lived MCP Inspector session on Outlook Classic, collect only Boolea
 - Verify whether `entry_id` short handles agree within the same process. Verify `outlook_get_mail` resolves every returned handle to the correct item. Do not infer identity from subject alone.
 - Compare source StoreIDs and EntryIDs **only inside the COM STA**, report whether the values match (yes/no), not the values.
 - Verify `anchor_included` on a one-message thread and a multi-store thread; check newest-N omission.
-- Run the Python **FastMCP wrappers** separately with read-only calls (including one empty and one nonempty list), inspect the `content`/`structuredContent` envelope and markdown/json formatting locally, and report key names and types only.
+- Python **FastMCP stdio wrappers** were later tested for whoami, list_folders, list_mails and get_mail (details below). Remaining useful checks are empty-list response shape and markdown mode for whoami/list_folders; report keys and types only.
 - Keep the existing Python server and all live client/plugin config unchanged. Do not run any mutating tools until #8's server-side permission gates are implemented.
 
-**Acceptance:** issue #2 has source declarations, real FastMCP registration metadata and client-only live field observations. It is **not closed**, because wrapper/output envelope validation and some conditional shapes are still outstanding; changes to the Rust compatibility surface belong in scoped, separately tested PRs. No merge without explicit owner instruction.
+**Acceptance:** issue #2 has source declarations, real FastMCP registration metadata and client-only live field observations. It is **not closed**, because selected wrapper paths were subsequently validated but some conditional shapes and explicit acceptance sign-off are still outstanding; changes to the Rust compatibility surface belong in scoped, separately tested PRs. No merge without explicit owner instruction.
+
+## Follow-up: Python FastMCP stdio wrapper validation (owner report, 2026-11-02)
+
+The owner subsequently checked out commit `73efbd5` on PR #22 and ran the **real Python FastMCP server over stdio** with an isolated client against the interactive Outlook Classic profile. `origin` was confirmed as the fork. The report contains shapes and lengths only, with no mailbox values. No client/plugin configuration was changed; no mutation tool was invoked. The owner also reported `--static` passed (31 declarations), 9 `unittest` tests passed, and `--runtime` passed with `mcp==1.29.0`.
+
+| Tool | Read-only mode tested | Text response | `structuredContent` | Result |
+| --- | --- | --- | --- | --- |
+| `outlook_whoami` | `json` | JSON string | `{"result":"<JSON string>"}` | PASS |
+| `outlook_list_folders` | `json` | JSON with `count` and `items` | `{"result":"<JSON string>"}` | PASS |
+| `outlook_list_mails` | `markdown` | Markdown | Full underlying data object | PASS |
+| `outlook_list_mails` | `json` | JSON, identical to structured data | Full underlying data object | PASS |
+| `outlook_get_mail` | `max_body_chars=200` | JSON, identical to structured data | Full underlying data object | PASS; 200 characters, `body_truncated=true`, `body_total_chars` present |
+| `outlook_get_mail` | `max_body_chars=0` | JSON, identical to structured data | Full underlying data object | PASS; untruncated 8,839 characters; `body_truncated` and `body_total_chars` absent |
+
+**Confirmed Python output-contract inconsistency:** `whoami` and `list_folders` declare `-> str`, so FastMCP 1.29.0 wraps their `structuredContent` in a `result` string rather than returning the underlying object. `list_mails` and `get_mail` explicitly return `CallToolResult` with the underlying data in `structuredContent`. This is the current Python behavior, **not a failing test**. The Rust rewrite may deliberately use direct structured payloads for consistency; document this as an intentional difference instead of silently claiming byte-for-byte Python parity.
+
+**Conditional truncation:** Python `max_body_chars=0` disables its body cap; `body_truncated` and `body_total_chars` appear only when truncation occurs. Do not copy the unlimited-body behavior into Rust without preserving Rust's response limits and explicit safety policy. The body contents were neither printed nor retained.
+
+**Still not live-tested:** `outlook_whoami` in Markdown, `outlook_list_folders` in Markdown, empty-list wrapper behavior, actual attachment element shapes, GAL directory rows, unresolved name, OOF error response and **all 16 mutating tools**. The source-derived result inventory for those branches remains a contract reference, not observed COM behavior.
+
+**Acceptance interpretation:** The primary issue #2 baseline is now grounded in a machine-readable snapshot of all 31 input schemas, CI-verified FastMCP registration and real Outlook Classic read-only client plus selected **stdio wrapper** observations. Remaining conditional branches are documented known gaps; whether they block the *schema foundation PR* versus later per-tool parity work is an owner review decision. This evidence does not establish full 31-tool Rust feature parity, permission safety or release readiness.

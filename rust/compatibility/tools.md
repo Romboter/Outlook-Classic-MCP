@@ -2,7 +2,7 @@
 
 **Baseline:** Python server in this fork at `src/outlook_mcp/tools/` and `src/outlook_mcp/client/`, version 0.3.2 at the start of the rewrite. This inventory enumerates all **31** existing `outlook_*` tools; it is a **migration checklist**, not a statement of Rust support.
 
-**Current draft implementation (2026-10-31, through PR #18):** five names from the existing Python inventory are implemented experimentally in Rust: `outlook_whoami`, `outlook_list_folders`, `outlook_list_mails`, `outlook_search_mails`, and `outlook_get_mail`. The Rust branch stack additionally registers `outlook_get_thread` and `outlook_rust_status` (not part of the 31-tool original inventory). **Live Outlook Classic validation is still outstanding; no Rust changes are merged to `main`.**
+**Current draft implementation (2026-11-02, through PR #20):** five names from the existing Python inventory are implemented experimentally in Rust: `outlook_whoami`, `outlook_list_folders`, `outlook_list_mails`, `outlook_search_mails`, and `outlook_get_mail`. The Rust branch stack additionally registers `outlook_get_thread` and `outlook_rust_status` (not part of the 31-tool original inventory). **The owner reported selected live Outlook Classic results on 2026-11-02; these do not constitute a complete validated run against PR #20. No Rust changes are merged to `main`.**
 
 | Existing tool | Category | Operation | Python source | Rust milestone |
 | --- | --- | --- | --- | --- |
@@ -37,6 +37,15 @@
 | `outlook_toggle_rule` | Rules | Write immediately | `tools/rules.py` | #8, #9 |
 | `outlook_get_out_of_office` | OOF | Read | `tools/ooo.py` | #9 |
 | `outlook_whoami` | Account | Read | `tools/account.py` | #4 |
+
+## Reported observations and open compatibility gaps (2026-11-02)
+
+- Live owner observations: five Python-named read-only Rust tools, plus `outlook_get_thread` and `outlook_rust_status`; four matching subject hits across legacy, Table and opt-in indexed; Outlook reply history trimming; Unicode budgets; independent conversations sharing a subject remain separate. These observations require a tested commit and a redacted signed-off validation report before closing issues.
+- Short handles are session-scoped **identity references, not search ranks**. The first time an `(EntryID, StoreID)` identity is seen, it receives the next `mN`; the same identity should retain its handle in that process until eviction/restart. Different result order does not imply different message identity. A per-backend mismatch requires investigation only if the same canonical identity gets inconsistent handles within one live process.
+- Indexed search took approximately **6.5 seconds** for one reported simple subject search. Remains explicit opt-in; no speed advantage claimed.
+- The `anchor_included` result was falsely negative on a reported thread even when the anchor appeared. PR #20 changes comparison to EntryID-only; check cross-store safety and recency filtering before treating resolved.
+- Upstream Python still has incompatible defaults/behavior (`limit` 25 vs Rust 10, some 100 vs Rust 30 caps, markdown/json options, Python raw DASL and HTML support vs intentionally restricted Rust APIs). Preserve documented deliberate safety differences rather than silently exposing unsafe capabilities.
+- A corrupted body already present within Outlook itself (U+FFFD in both Body and HTMLBody after Microsoft 365 connector submission) is not a Rust decoding defect.
 
 ## Compatibility details requiring real tests
 

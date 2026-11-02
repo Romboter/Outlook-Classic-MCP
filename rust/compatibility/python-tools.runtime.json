@@ -52,7 +52,7 @@
       "inputSchema": {
         "$defs": {
           "Recurrence": {
-            "description": "Recurrence pattern for calendar events.\n\n``type`` is the cadence; ``interval`` is the spacing (every N days /\nweeks / months / years). Provide either ``occurrences`` or\n``end_date`` to bound the series � if both are omitted the pattern\nruns indefinitely.",
+            "description": "Recurrence pattern for calendar events.\n\n``type`` is the cadence; ``interval`` is the spacing (every N days /\nweeks / months / years). Provide either ``occurrences`` or\n``end_date`` to bound the series — if both are omitted the pattern\nruns indefinitely.",
             "properties": {
               "end_date": {
                 "anyOf": [
@@ -602,7 +602,7 @@
           },
           "include_html": {
             "default": false,
-            "description": "Also include the raw HTML body. Off by default � it is usually huge and rarely needed; the plain-text body carries the same content.",
+            "description": "Also include the raw HTML body. Off by default — it is usually huge and rarely needed; the plain-text body carries the same content.",
             "title": "Include Html",
             "type": "boolean"
           },
@@ -713,7 +713,7 @@
         "readOnlyHint": true,
         "title": "List Outlook contacts"
       },
-      "description": "List saved contacts from every contact folder in every store.\n\n        Note: on corporate accounts the personal contact folders are often\n        nearly empty � colleagues live in the directory instead. Use\n        outlook_search_contacts (which also searches the directory) to\n        find people.\n        ",
+      "description": "List saved contacts from every contact folder in every store.\n\n        Note: on corporate accounts the personal contact folders are often\n        nearly empty — colleagues live in the directory instead. Use\n        outlook_search_contacts (which also searches the directory) to\n        find people.\n        ",
       "inputSchema": {
         "properties": {
           "limit": {
@@ -1221,7 +1221,7 @@
         "readOnlyHint": true,
         "title": "Resolve a name to an email address"
       },
-      "description": "Resolve a name against the address book/directory to its SMTP address.\n\n        Use before sending when you only know a person's name. Ambiguous\n        names won't resolve � fall back to outlook_search_contacts.\n        ",
+      "description": "Resolve a name against the address book/directory to its SMTP address.\n\n        Use before sending when you only know a person's name. Ambiguous\n        names won't resolve — fall back to outlook_search_contacts.\n        ",
       "inputSchema": {
         "properties": {
           "name": {

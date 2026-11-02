@@ -54,6 +54,7 @@
 The following new **source-derived, unverified** artifacts cover all 31 Python tools and are committed without accessing Outlook:
 
 - [Python tool declarations](python-tools.declarations.json) — names, 104 declared input parameters, types, defaults, field constraints, tool descriptions, read/write annotations, resource URI associations, and return envelopes. These are an offline interpretation of the committed decorators, **not** the official FastMCP JSON Schema wire response.
+- [Captured FastMCP tools/list metadata](python-tools.runtime.json) — **actual 31-tool registered input schemas**, descriptions, annotations and UI metadata captured on hosted Windows GitHub Actions, without initializing COM or opening Outlook. The runtime validator checks for drift from this committed snapshot. This proves registration metadata, **not** message-result correctness.
 - [Python result field inventory and redacted fixtures](python-results.redacted.json) — observed code-level output keys, conditional-shape notes, and synthetic placeholder-only examples. These are **not** outputs from a real mailbox and are not strict verified result JSON Schemas.
 - [Offline/registration validator](../../scripts/verify_python_contract_snapshot.py) — checks committed declarations against Python syntax; optionally compares the declarations with the actual local FastMCP \`tools/list\` registry without starting Outlook.
 - [Contract regression tests](../../tests/test_python_contract_snapshot.py) — guard 31-tool coverage, representative defaults, nested recurrence, annotation flags, UI resource count and placeholder-only fixtures.
@@ -76,7 +77,7 @@ python scripts/verify_python_contract_snapshot.py --capture-runtime
 
 The last command writes \`rust/compatibility/python-tools.runtime.json\` (actual FastMCP registration, containing **only** tool metadata and JSON Schemas). Review and commit this generated file after confirming it contains no mailbox content. If the runtime check fails, resolve the differences **without weakening compatibility checks** and recapture. No Python tool is invoked, and no COM thread is started by the metadata-only commands. Check the result payloads against *approved test fixtures only* on a controlled Windows Outlook Classic host; redact any subjects, addresses, content, identifiers and paths **before** proposing updates to the repository. Never add real mailbox samples to Git.
 
-**Acceptance remains open:** the current snapshots document Python code declarations and possible result shapes; runtime metadata matching, result-shape reconciliation, and owner-reviewed live test evidence have not been established for this PR.
+**Acceptance remains open:** Windows CI has confirmed FastMCP registration metadata and captured its 31-tool snapshot; result-shape reconciliation and owner-reviewed live test evidence have **not** been established. The source-derived redacted examples must not be presented as live outputs.
 
 ## Contract capture checklist
 

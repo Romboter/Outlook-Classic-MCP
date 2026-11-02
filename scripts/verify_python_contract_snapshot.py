@@ -262,6 +262,13 @@ def main() -> int:
         if len(runtime) != EXPECTED:
             errors.append(f"FastMCP registered {len(runtime)} tools, expected 31")
         errors.extend(compare_runtime(snapshot, runtime))
+        if args.runtime and RUNTIME.exists():
+            frozen = json.loads(RUNTIME.read_text(encoding="utf-8"))
+            if frozen.get("toolCount") != EXPECTED or frozen.get("tools") != runtime:
+                errors.append(
+                    "FastMCP metadata differs from committed python-tools.runtime.json; "
+                    "review the actual metadata and recapture intentionally"
+                )
         if args.capture_runtime and not errors:
             RUNTIME.write_text(json.dumps({
                 "provenance": "Local FastMCP registration; no COM initialized or mail accessed",

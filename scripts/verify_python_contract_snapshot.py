@@ -218,8 +218,17 @@ def compare_runtime(snapshot: dict, actual: list[dict]) -> list[str]:
             actual_prop = schema["properties"][prop]
             for key in ("default", "description", "minimum", "maximum",
                         "minLength", "maxLength", "minItems", "maxItems"):
-                if key in expected and expected[key] != actual_prop.get(key):
-                    errors.append(f"{name}.{prop}: {key} differs")
+                if key in expected:
+                    actual_value = actual_prop.get(key)
+                    # Pydantic places Optional[int] constraints on the
+                    # non-null anyOf branch; source snapshot keeps them flat.
+                    if actual_value is None and "anyOf" in actual_prop:
+                        actual_value = next(
+                            (part[key] for part in actual_prop["anyOf"] if key in part),
+                            None,
+                        )
+                    if expected[key] != actual_value:
+                        errors.append(f"{name}.{prop}: {key} differs")
             # FastMCP can include title and Pydantic-specific schema fields.
             # Compare fundamental types and Optional-nullability only.
             expected_types = sorted(s.get("type", "$ref") for s in

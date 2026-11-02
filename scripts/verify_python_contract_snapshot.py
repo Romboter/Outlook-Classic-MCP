@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import ast
 import asyncio
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -183,6 +184,13 @@ def compare_static(snapshot: dict) -> list[str]:
 def normalized_runtime_tool(tool) -> dict:
     # Tool is a Pydantic MCP protocol model. Explicit by_alias retains inputSchema.
     data = tool.model_dump(mode="json", by_alias=True, exclude_none=True)
+    return clean_description(data)
+
+
+def clean_description(data: dict) -> dict:
+    # FastMCP versions differ on whether docstring indentation is stripped.
+    if isinstance(data.get("description"), str):
+        data["description"] = inspect.cleandoc(data["description"])
     return data
 
 
@@ -264,7 +272,7 @@ def main() -> int:
         errors.extend(compare_runtime(snapshot, runtime))
         if args.runtime and RUNTIME.exists():
             frozen = json.loads(RUNTIME.read_text(encoding="utf-8"))
-            if frozen.get("toolCount") != EXPECTED or frozen.get("tools") != runtime:
+            if frozen.get("toolCount") != EXPECTED or [clean_description(dict(t)) for t in frozen.get("tools", [])] != runtime:
                 def first_difference(left, right, location="$"):
                     if type(left) is not type(right):
                         return location + " (type)"

@@ -1,6 +1,6 @@
 # Rust MCP tool reference
 
-**As of the issue #9 batch 1 branch (draft):** One diagnostic tool and thirteen **experimental, read-only** Outlook Classic tools (six mail/folder/thread plus seven contacts/categories/rules/out-of-office) are registered in `rust/src/lib.rs`. This inventory is grounded in `rust/src/contracts.rs`; it is not a live Outlook verification.
+**As of the issue #9 batch 2 branch (draft, stacked on batch 1):** One diagnostic tool and sixteen **experimental, read-only** Outlook Classic tools (six mail/folder/thread, seven contacts/categories/rules/out-of-office, and three calendar/task reads) are registered in `rust/src/lib.rs`. This inventory is grounded in `rust/src/contracts.rs`; it is not a live Outlook verification.
 
 | Tool | Main inputs | Defaults / limits | Output or caveat |
 | --- | --- | --- | --- |
@@ -17,6 +17,9 @@
 | `outlook_list_categories` | none | — | Profile color categories (name, color index) |
 | `outlook_list_rules` | none | — | Default-store rules (index, name, enabled); read-only |
 | `outlook_get_out_of_office` | none | — | `out_of_office`/`status` on, off, or unknown when the MAPI property is unreadable |
+| `outlook_list_events` | `start?`, `end?`, `limit?`, `include_recurrences?` | window default now to +14 days, max 366 days; limit 50 / max 200 (matches Python) | Default-store calendar. Local wall-clock ISO-8601 **without** offset; `Z`/offsets are rejected (Python accepted aware times). Recurrences expanded by default; `has_more` and `scan_truncated` added. `entry_id` is a short handle |
+| `outlook_get_event` | `entry_id`, `store_id?` | body capped at 4,000 chars | Handle from `list_events` or raw EntryID; includes attendees (max 100), reminder, categories; `body_truncated` added. Rejects non-appointment items |
+| `outlook_list_tasks` | `limit?`, `include_completed?` | limit 50 / max 200 (matches Python); open tasks only by default | Default Tasks folder sorted by due date; unset dates are `null` (Python emitted the year-4501 placeholder) |
 | `outlook_get_thread` | `entry_id`, `store_id?`, `max_messages?`, `include_bodies?`, `trim_quoted?`, `per_message_chars?`, `total_body_chars?` | 10 / max 30 messages; per-body 1,500 / max 6,000; total 8,000 / max 24,000 | Exact ConversationID; only recognized quote tails trimmed, omissions flagged |
 
 All mail list/search/thread messages should return compact in-memory `entry_id` handles such as `m1` rather than raw EntryIDs/StoreIDs. Handles expire on restart and may be evicted; repeat search/list when `outlook_get_mail` says a reference is unknown. Raw IDs can still be supplied for compatibility but **do not share them in issues**.

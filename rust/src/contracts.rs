@@ -1,5 +1,6 @@
 //! Read-only MCP request contracts. Values are validated again on the server
 //! side; JSON Schema is a usability hint, not an authorization boundary.
+use crate::localtime::LocalTime;
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -111,8 +112,42 @@ pub struct ResolveNameParams {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ListEventsParams {
+    /// Local ISO-8601 start of range, e.g. 2026-04-25T09:00. No time zone offset. Defaults to now.
+    pub start: Option<String>,
+    /// Local ISO-8601 end of range. Defaults to start + 14 days; the range may not exceed 366 days.
+    pub end: Option<String>,
+    /// Maximum events (default 50, maximum 200).
+    pub limit: Option<u32>,
+    /// Expand recurring series into occurrences (default true).
+    pub include_recurrences: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct GetEventParams {
+    /// Short handle from list_events (e.g. m1), or a raw Outlook EntryID.
+    pub entry_id: String,
+    /// StoreID for raw identifiers in non-default stores.
+    pub store_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ListTasksParams {
+    /// Maximum tasks (default 50, maximum 200).
+    pub limit: Option<u32>,
+    /// Include completed tasks (default false).
+    pub include_completed: Option<bool>,
+}
+
+/// Longest calendar window one call may cover.
+pub const MAX_EVENT_RANGE_DAYS: i64 = 366;
+
 #[derive(Debug, Clone)]
 pub enum MailCommand {
+    ListEvents(ListEventsParams),
+    GetEvent(GetEventParams),
+    ListTasks(ListTasksParams),
     WhoAmI,
     ListContacts(ListContactsParams),
     SearchContacts(SearchContactsParams),
@@ -178,6 +213,35 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         | MailCommand::ListCategories
         | MailCommand::ListRules
         | MailCommand::GetOutOfOffice => Ok(()),
+        MailCommand::ListEvents(x) => {
+            checked_limit_in(x.limit, 50, 200)?;
+            let start = x.start.as_deref().map(LocalTime::parse).transpose()?;
+            let end = x.end.as_deref().map(LocalTime::parse).transpose()?;
+            if let (Some(start), Some(end)) = (start, end) {
+                let minutes = end.minutes() - start.minutes();
+                if minutes <= 0 {
+                    return Err("end must be after start".into());
+                }
+                if minutes > MAX_EVENT_RANGE_DAYS * 1440 {
+                    return Err(format!(
+                        "date range may not exceed {MAX_EVENT_RANGE_DAYS} days"
+                    ));
+                }
+            }
+            Ok(())
+        }
+        MailCommand::GetEvent(x) => {
+            if x.entry_id.is_empty()
+                || x.entry_id.len() > 4096
+                || x.store_id
+                    .as_ref()
+                    .is_some_and(|s| s.is_empty() || s.len() > 4096)
+            {
+                return Err("invalid event EntryID/StoreID".into());
+            }
+            Ok(())
+        }
+        MailCommand::ListTasks(x) => checked_limit_in(x.limit, 50, 200).map(|_| ()),
         MailCommand::ListContacts(x) => {
             checked_limit_in(x.limit, 50, 200)?;
             if x.offset.unwrap_or(0) > 5000 {
@@ -371,6 +435,41 @@ mod tests {
         );
         assert!(
             validate_command(&MailCommand::GetContact(GetContactParams {
+                entry_id: "".into(),
+                store_id: None
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn validates_event_and_task_commands() {
+        let events = |start: Option<&str>, end: Option<&str>, limit| {
+            validate_command(&MailCommand::ListEvents(ListEventsParams {
+                start: start.map(Into::into),
+                end: end.map(Into::into),
+                limit,
+                include_recurrences: None,
+            }))
+        };
+        assert!(events(None, None, None).is_ok());
+        assert!(events(Some("2026-04-25T09:00"), Some("2026-05-09"), Some(200)).is_ok());
+        assert!(events(None, None, Some(201)).is_err());
+        assert!(events(Some("2026-04-25T09:00:00Z"), None, None).is_err());
+        assert!(events(Some("2026-05-09"), Some("2026-04-25"), None).is_err());
+        assert!(events(Some("2026-01-01"), Some("2026-01-01"), None).is_err());
+        assert!(events(Some("2026-01-01"), Some("2027-01-02"), None).is_ok());
+        assert!(events(Some("2026-01-01"), Some("2027-01-03"), None).is_err());
+        let tasks = |limit| {
+            validate_command(&MailCommand::ListTasks(ListTasksParams {
+                limit,
+                include_completed: None,
+            }))
+        };
+        assert!(tasks(Some(200)).is_ok());
+        assert!(tasks(Some(0)).is_err());
+        assert!(
+            validate_command(&MailCommand::GetEvent(GetEventParams {
                 entry_id: "".into(),
                 store_id: None
             }))

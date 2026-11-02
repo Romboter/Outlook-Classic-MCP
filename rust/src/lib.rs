@@ -142,7 +142,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "List contacts from every contact folder in every store, sorted by name. Bounded (default 10, max 30; scan_truncated reports hitting the scan budget). entry_id is a short session handle; call outlook_get_contact."
+        description = "List contacts from every contact folder in every store, sorted by name. Bounded (default 50, max 200; scan_truncated reports hitting the scan budget). entry_id is a short session handle; call outlook_get_contact."
     )]
     async fn outlook_list_contacts(
         &self,

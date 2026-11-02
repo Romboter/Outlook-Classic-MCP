@@ -5,8 +5,8 @@
 use super::mailbox::{bool_property, optional_text};
 use super::win;
 use crate::contracts::{
-    GetContactParams, ListContactsParams, ResolveNameParams, SearchContactsParams, checked_limit,
-    matches_all, query_words,
+    GetContactParams, ListContactsParams, ResolveNameParams, SearchContactsParams,
+    checked_limit_in, matches_all, query_words,
 };
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -118,7 +118,7 @@ fn is_contact(item: &IDispatch) -> bool {
 }
 
 pub(super) fn list_contacts(namespace: &IDispatch, params: ListContactsParams) -> Result<Value> {
-    let limit = checked_limit(params.limit).map_err(anyhow::Error::msg)?;
+    let limit = checked_limit_in(params.limit, 50, 200).map_err(anyhow::Error::msg)?;
     let offset = params.offset.unwrap_or(0) as usize;
     let deadline = Instant::now() + CONTACT_BUDGET;
     let (mut rows, mut skipped, mut scanned) = (Vec::new(), 0usize, 0usize);
@@ -224,7 +224,7 @@ pub(super) fn search_contacts(
     namespace: &IDispatch,
     params: SearchContactsParams,
 ) -> Result<Value> {
-    let limit = checked_limit(params.limit).map_err(anyhow::Error::msg)?;
+    let limit = checked_limit_in(params.limit, 25, 100).map_err(anyhow::Error::msg)?;
     let words = query_words(&params.query);
     let started = Instant::now();
     let deadline = started + CONTACT_BUDGET;

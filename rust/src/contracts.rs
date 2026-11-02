@@ -81,7 +81,7 @@ pub struct ThreadParams {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ListContactsParams {
-    /// Number of contacts to return (default 10, maximum 30).
+    /// Number of contacts to return (default 50, maximum 200).
     pub limit: Option<u32>,
     /// Number of contacts to skip across all contact folders (default 0, maximum 5000).
     pub offset: Option<u32>,
@@ -91,7 +91,7 @@ pub struct ListContactsParams {
 pub struct SearchContactsParams {
     /// Words that must all appear in name, email, company or job title (1..160 characters).
     pub query: String,
-    /// Maximum result count (default 10, maximum 30).
+    /// Maximum result count (default 25, maximum 100).
     pub limit: Option<u32>,
     /// Also scan the Exchange Global Address List by display name (default true).
     pub include_directory: Option<bool>,
@@ -145,6 +145,15 @@ fn checked_text(value: &str, what: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Limit check for tools whose Python defaults are larger than the mail tools'.
+pub fn checked_limit_in(input: Option<u32>, default: u32, max: u32) -> Result<usize, String> {
+    let n = input.unwrap_or(default);
+    if !(1..=max).contains(&n) {
+        return Err(format!("limit must be between 1 and {max}"));
+    }
+    Ok(n as usize)
+}
+
 pub fn checked_limit(input: Option<u32>) -> Result<usize, String> {
     let n = input.unwrap_or(10);
     if !(1..=30).contains(&n) {
@@ -170,14 +179,14 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         | MailCommand::ListRules
         | MailCommand::GetOutOfOffice => Ok(()),
         MailCommand::ListContacts(x) => {
-            checked_limit(x.limit)?;
+            checked_limit_in(x.limit, 50, 200)?;
             if x.offset.unwrap_or(0) > 5000 {
                 return Err("offset must be 0..5000".into());
             }
             Ok(())
         }
         MailCommand::SearchContacts(x) => {
-            checked_limit(x.limit)?;
+            checked_limit_in(x.limit, 25, 100)?;
             checked_text(&x.query, "query")
         }
         MailCommand::GetContact(x) => {
@@ -330,13 +339,28 @@ mod tests {
         assert!(search("jane doe", None).is_ok());
         assert!(search("   ", None).is_err());
         assert!(search(&"x".repeat(161), None).is_err());
-        assert!(search("jane", Some(31)).is_err());
+        assert!(search("jane", Some(100)).is_ok());
+        assert!(search("jane", Some(101)).is_err());
         let list = |offset| {
             validate_command(&MailCommand::ListContacts(ListContactsParams {
                 limit: None,
                 offset,
             }))
         };
+        assert!(
+            validate_command(&MailCommand::ListContacts(ListContactsParams {
+                limit: Some(200),
+                offset: None
+            }))
+            .is_ok()
+        );
+        assert!(
+            validate_command(&MailCommand::ListContacts(ListContactsParams {
+                limit: Some(201),
+                offset: None
+            }))
+            .is_err()
+        );
         assert!(list(Some(5000)).is_ok());
         assert!(list(Some(5001)).is_err());
         assert!(

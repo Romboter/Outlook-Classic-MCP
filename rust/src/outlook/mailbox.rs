@@ -109,7 +109,7 @@ fn item_summary(item: &IDispatch, store_id: &str) -> Value {
         "store_id": store_id,
         "subject": optional_text(item, "Subject"),
         "from": optional_text(item, "SenderName"),
-        "from_address": optional_text(item, "SenderEmailAddress"),
+        "from_address": table::public_address(&optional_text(item, "SenderEmailAddress")),
         "received_local": text_property(item, "ReceivedTime"),
         "unread": bool_property(item, "UnRead")
     })
@@ -278,7 +278,7 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
             Ok(json!({
                 "folder": folder_name, "count": rows.len(), "limit": limit,
                 "offset": offset, "has_more": has_more, "items": rows,
-                "backend": "items_legacy_fallback",
+                "backend": if backend == "legacy" { "items_legacy" } else { "items_legacy_fallback" },
                 "table_fallback": backend == "auto",
                 "instant_search_enabled": instant_search_enabled,
                 "elapsed_ms": started.elapsed().as_millis()

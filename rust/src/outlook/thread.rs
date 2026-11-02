@@ -21,7 +21,7 @@ use windows::{
 // Documented property: PR_STORE_ENTRYID (binary) in Conversation.GetTable.
 // Row.BinaryToString converts it to the precise StoreID that GetItemFromID
 // needs when messages span stores.
-const STORE_ENTRY_ID: &str = "https://schemas.microsoft.com/mapi/proptag/0x0FFB0102";
+const STORE_ENTRY_ID: &str = "http://schemas.microsoft.com/mapi/proptag/0x0FFB0102";
 const MAX_ROWS: usize = 350;
 
 struct Candidate {
@@ -151,6 +151,7 @@ fn collect_candidates(table: &IDispatch) -> Result<(Vec<Candidate>, bool, usize)
 
 impl win::Session {
     pub fn read_thread(&mut self, params: ThreadParams) -> Result<Value> {
+        let started = std::time::Instant::now();
         let max_messages = params.max_messages.unwrap_or(10) as usize;
         let per_message = params.per_message_chars.unwrap_or(1500) as usize;
         let total_budget = params.total_body_chars.unwrap_or(8000) as usize;
@@ -233,16 +234,17 @@ impl win::Session {
                 identity_mismatch += 1;
                 continue;
             }
-            if candidate.entry_id == anchor.entry_id
-                && candidate.store_id == anchor.store_id.as_deref().unwrap_or("")
-            {
+            // ponytail: EntryID only; StoreID text from the table's binary column and from
+            // Folder.StoreID are not guaranteed to be formatted alike, so comparing it
+            // reported a present anchor as missing.
+            if candidate.entry_id.eq_ignore_ascii_case(&anchor.entry_id) {
                 anchor_included = true;
             }
             let mut msg = json!({
                 "entry_id":candidate.entry_id,"store_id":candidate.store_id,
                 "subject":mail_text(&item,"Subject"),
                 "from":mail_text(&item,"SenderName"),
-                "from_address":mail_text(&item,"SenderEmailAddress"),
+                "from_address":super::table::public_address(&mail_text(&item,"SenderEmailAddress")),
                 "sent_local":mail_text(&item,"SentOn"),
                 "received_local":mail_text(&item,"ReceivedTime")
             });
@@ -293,6 +295,7 @@ impl win::Session {
             "messages_with_body_truncation":body_truncated_messages,
             "total_body_chars_returned":total_retained,
             "total_body_chars_limit":total_budget,
+            "elapsed_ms":started.elapsed().as_millis(),
             "note":"Conversation.GetTable omits Deleted Items. Quoted history trimming is conservative, but may remove meaningful text; retrieve any message raw with outlook_get_mail when accuracy matters."
         }))
     }

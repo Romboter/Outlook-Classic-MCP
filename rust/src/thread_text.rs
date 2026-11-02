@@ -19,6 +19,19 @@ fn is_original_separator(line: &str) -> bool {
     )
 }
 
+/// Outlook's native reply header: `From:` followed shortly by `Sent:`.
+fn is_outlook_header(lines: &[&str], i: usize) -> bool {
+    lines[i].trim_start().starts_with("From:")
+        && lines[i + 1..lines.len().min(i + 4)]
+            .iter()
+            .any(|l| l.trim_start().starts_with("Sent:"))
+}
+
+fn is_underscore_rule(line: &str) -> bool {
+    let t = line.trim();
+    t.len() >= 10 && t.chars().all(|c| c == '_')
+}
+
 /// Remove only recognized terminal quoted history. Keep the original body
 /// entirely when a separator would be at the first line or the shape is
 /// ambiguous. This is not a semantic conversation summarizer.
@@ -28,10 +41,16 @@ pub fn trim_quote_tail(body: &str) -> Trimmed {
         .iter()
         .enumerate()
         .find_map(|(i, line)| {
-            if i == 0 || !is_original_separator(line) {
+            if i == 0 || !(is_original_separator(line) || is_outlook_header(&lines, i)) {
                 return None;
             }
-            let prefix = lines[..i].join("\n");
+            let mut end = i;
+            while end > 0
+                && (lines[end - 1].trim().is_empty() || is_underscore_rule(lines[end - 1]))
+            {
+                end -= 1;
+            }
+            let prefix = lines[..end].join("\n");
             (!prefix.trim().is_empty()).then_some(prefix)
         })
         .or_else(|| {
@@ -97,6 +116,15 @@ mod tests {
         assert_eq!(r.text, "Please deploy after lunch.");
         assert!(r.quote_removed);
         assert!(r.chars_removed > 0);
+    }
+    #[test]
+    fn removes_outlook_from_sent_header_block() {
+        let b = "Sounds good.\r\n\r\n________________________________\r\nFrom: A <a@x.com>\r\nSent: Monday\r\nTo: B\r\nSubject: Hi\r\n\r\nold text";
+        let r = trim_quote_tail(b);
+        assert_eq!(r.text, "Sounds good.");
+        assert!(r.quote_removed);
+        let lone = "From: me\nthe sender list follows";
+        assert_eq!(trim_quote_tail(lone).text, lone);
     }
     #[test]
     fn removes_terminal_angle_quote_but_not_inline_new_material() {

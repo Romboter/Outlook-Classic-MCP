@@ -63,6 +63,17 @@ fn unread(row: &IDispatch) -> Option<bool> {
     Some(flags & 1 == 0)
 }
 
+/// Exchange-internal senders report an X.500 DN (`/O=...`), not an SMTP address.
+/// Withhold it: it is long, opaque and useless to a client.
+// ponytail: blank instead of resolving SMTP via Sender.GetExchangeUser(), which needs a MailItem.
+pub fn public_address(address: &str) -> String {
+    if address.starts_with('/') {
+        String::new()
+    } else {
+        address.to_string()
+    }
+}
+
 pub fn store_instant_search(folder: &IDispatch) -> Option<bool> {
     let store = win::object_property(folder, "Store").ok()?;
     let value = win::property(&store, "IsInstantSearchEnabled").ok()?;
@@ -162,7 +173,12 @@ pub fn enumerate_existing(
         scanned += 1;
         let row = win::method_object(table, "GetNextRow", vec![])?;
         let class = text(&row, "MessageClass");
-        if !class.starts_with("IPM.Note") && !class.starts_with("IPM.Post") {
+        // Meeting items (Class 53) are readable via get_mail and the legacy
+        // backend, so the table backend must list them too.
+        if !class.starts_with("IPM.Note")
+            && !class.starts_with("IPM.Post")
+            && !class.starts_with("IPM.Schedule.Meeting")
+        {
             continue;
         }
         let entry_id = text(&row, "EntryID");
@@ -210,7 +226,7 @@ pub fn enumerate_existing(
             "store_id": store_id,
             "subject": text(&row, "Subject"),
             "from": sender_name,
-            "from_address": sender_address,
+            "from_address": public_address(&sender_address),
             "received_local": text(&row, "ReceivedTime"),
             "unread": unread_state
         }));
@@ -227,6 +243,11 @@ pub fn enumerate_existing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn x500_addresses_are_withheld() {
+        assert_eq!(public_address("/O=EXCHANGELABS/CN=X"), "");
+        assert_eq!(public_address("a@b.com"), "a@b.com");
+    }
     #[test]
     fn table_scan_cap_is_bounded() {
         assert_eq!(MAX_SCANNED, 10_000);

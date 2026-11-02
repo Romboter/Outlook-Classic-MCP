@@ -12,7 +12,10 @@ These are the decisions embodied in current code, not a claim that every design 
 | Outlook-owned search; no raw OST parsing/index copy | Lower storage, synchronization and security cost | Must benchmark actual `Items.Restrict`, Table and indexed correctness |
 | `AdvancedSearch` is explicit opt-in | Event completion and provider support not live-tested | `auto` stays on existing paths until validated |
 | Compact session handles | Avoid repeatedly sending large MAPI IDs to the LLM | Handles expire; cache 2,048; not authorization tokens |
-| Read-only Rust surface | Avoid accidental sends/deletions during migration | Full permissions and operation-aware retry work deferred to issue #8 |
+| Read-only Rust surface | Avoid accidental sends/deletions during migration | No write tool exists yet; the gating below lands first (issue #8) |
+| Server-enforced permission modes | A model or an email it reads must not be able to authorize itself | `OUTLOOK_MCP_MODE` (read-only default, draft, full) and `OUTLOOK_MCP_DENY` come only from the server environment; unrecognized values stop the server; no tool has a mode/confirm/permission argument (tested) |
+| Never replay a non-idempotent request | A lost connection mid-send may have taken effect | Only reads are retried after a COM disconnect; anything else reports `unknown_outcome` |
+| Per-request ticket | A caller that timed out must not have a queued write run later | Queued requests are cancelled and report "not executed"; running ones report `unknown_outcome` |
 | Conservative quoted-history trimming | Reduce duplicate conversation text without inventing summaries | Expose omissions and raw message recovery; compare with originals |
 | Keep dates as locale strings initially | Typed UTC conversion requires live provider testing | Never label `received_local` as UTC |
 | Branch+draft PR for every change | Reviewable, reversible work | No direct `main` writes or merges without owner approval |

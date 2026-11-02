@@ -15,7 +15,10 @@ The Rust server runs as the interactive Windows user and inherits that user's Ou
 - List/search default to 10 hits (30 maximum). Thread results enforce message and per/total body limits. Always review omission and truncation flags.
 - Session handles like `m1` shorten output, but **are not credentials**. The MCP process already has the Windows user's Outlook permissions.
 - COM caller timeouts do not cancel an underlying call. Don't assume immediate clean shutdown if Outlook is blocked by a dialog.
-- When Rust write actions are implemented later, require server-side modes and explicit, operation-aware confirmation/retry policies before enabling them.
+- **Permission modes (issue #8, draft PR):** the server starts `read-only`. `OUTLOOK_MCP_MODE=draft` adds draft creation only; `full` allows every capability. `OUTLOOK_MCP_DENY` (comma list of `modify,draft,send,delete,rules,events,files`) removes capabilities from the chosen mode and can never widen it. The mode is read from the server's environment at start and reported by `outlook_rust_status` as `permission_mode`; an unrecognized value stops the server rather than falling back. Tool arguments cannot change it, and a test fails if any tool gains a `mode`/`confirm`/`permission`-style parameter.
+- **Unknown outcomes:** a request cancelled while still queued reports it was not executed and never runs later. A non-read request that was running when it timed out, lost its COM connection or lost its result reports `status: "unknown_outcome"` and is **never** retried automatically; check Outlook before acting again. Only reads are retried after a reconnect.
+- **Attachment paths:** `rust/src/safe_path.rs` validates output files (reserved device names, separators, stream markers, trailing dots/spaces; directories must resolve inside the user profile after symlinks and `..`; files are created with `create_new` and renamed instead of overwritten). It is not wired to any tool yet.
+- **Still required before a write tool ships:** host-side confirmation for send, reply, forward, delete and meeting actions (model-written text is not authorization), and read-back reconciliation where reliable. Until then no write tool is registered.
 
 ## What can be recorded in GitHub
 

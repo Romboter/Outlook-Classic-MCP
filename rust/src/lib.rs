@@ -5,7 +5,10 @@
 pub mod contracts;
 pub mod localtime;
 pub mod outlook;
+pub mod policy;
+pub mod safe_path;
 pub mod thread_text;
+pub mod ticket;
 
 use contracts::{
     FolderParams, GetContactParams, GetEventParams, GetMailParams, ListContactsParams,
@@ -13,6 +16,7 @@ use contracts::{
     SearchContactsParams, SearchMailsParams, ThreadParams,
 };
 use outlook::OutlookBridge;
+use policy::Policy;
 use rmcp::{
     ServerHandler,
     handler::server::wrapper::Parameters,
@@ -21,6 +25,7 @@ use rmcp::{
 };
 use serde::Serialize;
 use std::sync::Arc;
+use ticket::UNKNOWN_OUTCOME;
 
 /// The Rust implementation is experimental until tested against a real
 /// Outlook Classic instance. A successful CI build is not a live COM test.
@@ -47,22 +52,47 @@ pub fn foundation_status() -> FoundationStatus {
 #[derive(Clone)]
 pub struct OutlookMcp {
     bridge: Arc<OutlookBridge>,
+    policy: Policy,
 }
 
 impl OutlookMcp {
+    /// Read-only, the safest mode. Use `with_policy` to opt into more.
     pub fn new() -> Self {
+        Self::with_policy(Policy::read_only())
+    }
+
+    pub fn with_policy(policy: Policy) -> Self {
         Self {
             bridge: Arc::new(OutlookBridge::start()),
+            policy,
         }
     }
 
     async fn call(&self, cmd: MailCommand) -> CallToolResult {
+        // Server-side gate: nothing the model sends can change the policy.
+        if let Err(message) = self.policy.check(cmd.capability()) {
+            return CallToolResult::error(vec![ContentBlock::text(message)]);
+        }
         let bridge = Arc::clone(&self.bridge);
         // COM/Windows calls must NEVER run directly on the async MCP executor.
         let result = tokio::task::spawn_blocking(move || bridge.execute(cmd)).await;
         match result {
             Ok(Ok(value)) => CallToolResult::success(vec![ContentBlock::text(value.to_string())]),
-            Ok(Err(error)) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
+            Ok(Err(error)) => {
+                let text = error.to_string();
+                match text.strip_prefix(UNKNOWN_OUTCOME) {
+                    // A write may or may not have happened; never present it as a plain failure.
+                    Some(detail) => CallToolResult::error(vec![ContentBlock::text(
+                        serde_json::json!({
+                            "status": "unknown_outcome",
+                            "detail": detail,
+                            "next_step": "Check Outlook to see whether the operation took effect. Do not retry automatically."
+                        })
+                        .to_string(),
+                    )]),
+                    None => CallToolResult::error(vec![ContentBlock::text(text)]),
+                }
+            }
             Err(error) => CallToolResult::error(vec![ContentBlock::text(format!(
                 "Outlook worker task failed: {error}"
             ))]),
@@ -82,8 +112,10 @@ impl OutlookMcp {
         description = "Return the Rust server stage and capability flags; does not check the connected Outlook session."
     )]
     fn outlook_rust_status(&self) -> String {
-        serde_json::to_string(&foundation_status())
-            .expect("serialization of static fields cannot fail")
+        let mut status = serde_json::to_value(foundation_status())
+            .expect("serialization of static fields cannot fail");
+        status["permission_mode"] = serde_json::json!(self.policy.describe());
+        status.to_string()
     }
 
     #[tool(
@@ -248,6 +280,48 @@ mod tests {
         assert!(status.mailbox_tools_available);
         assert!(!status.outlook_connected);
     }
+    #[test]
+    fn no_tool_accepts_a_parameter_that_could_grant_permission() {
+        // Permission comes from the server environment only. If a tool ever
+        // gained an argument like this, a model could try to authorize itself.
+        let forbidden = [
+            "mode",
+            "confirm",
+            "confirmed",
+            "permission",
+            "permissions",
+            "allow",
+            "force",
+            "policy",
+            "override",
+            "approve",
+            "approved",
+            "authorize",
+            "authorized",
+        ];
+        for tool in OutlookMcp::tool_router().list_all() {
+            let schema = serde_json::to_value(&*tool.input_schema).unwrap();
+            if let Some(props) = schema["properties"].as_object() {
+                for name in props.keys() {
+                    assert!(
+                        !forbidden.contains(&name.to_ascii_lowercase().as_str()),
+                        "{} exposes '{name}'",
+                        tool.name
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn default_server_is_read_only_and_reports_its_mode() {
+        let server = OutlookMcp::default();
+        assert_eq!(server.policy.mode(), policy::Mode::ReadOnly);
+        let status: serde_json::Value =
+            serde_json::from_str(&server.outlook_rust_status()).unwrap();
+        assert_eq!(status["permission_mode"], "read-only");
+    }
+
     #[test]
     fn registered_tools_are_read_only() {
         let router = OutlookMcp::tool_router();

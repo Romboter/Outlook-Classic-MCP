@@ -265,9 +265,31 @@ def main() -> int:
         if args.runtime and RUNTIME.exists():
             frozen = json.loads(RUNTIME.read_text(encoding="utf-8"))
             if frozen.get("toolCount") != EXPECTED or frozen.get("tools") != runtime:
+                def first_difference(left, right, location="$"):
+                    if type(left) is not type(right):
+                        return location + " (type)"
+                    if isinstance(left, dict):
+                        if set(left) != set(right):
+                            return location + " (keys)"
+                        for key in sorted(left):
+                            difference = first_difference(left[key], right[key], location + "." + key)
+                            if difference:
+                                return difference
+                    elif isinstance(left, list):
+                        if len(left) != len(right):
+                            return location + " (length)"
+                        for index, (a, z) in enumerate(zip(left, right)):
+                            difference = first_difference(a, z, location + f"[{index}]")
+                            if difference:
+                                return difference
+                    elif left != right:
+                        return location + " (value)"
+                    return None
+
                 errors.append(
-                    "FastMCP metadata differs from committed python-tools.runtime.json; "
-                    "review the actual metadata and recapture intentionally"
+                    "FastMCP metadata differs from committed python-tools.runtime.json at "
+                    + str(first_difference(frozen.get("tools"), runtime))
+                    + "; review actual metadata and recapture intentionally"
                 )
         if args.capture_runtime and not errors:
             RUNTIME.write_text(json.dumps({

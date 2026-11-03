@@ -126,10 +126,14 @@ pub(super) fn date_variant(time: &LocalTime) -> Result<VARIANT> {
 
 /// A DATE property as local ISO-8601 text, or None when unset or unreadable.
 pub(super) fn date_iso(object: &IDispatch, name: &str) -> Option<String> {
-    let value = win::property(object, name).ok()?;
+    variant_iso(&win::property(object, name).ok()?)
+}
+
+/// A DATE value (item property or table cell) as local ISO-8601 text with offset.
+pub(super) fn variant_iso(value: &VARIANT) -> Option<String> {
     let mut converted = VARIANT::default();
     // SAFETY: both VARIANTs are live locals; VT_DATE coerces to its VT_R8 value.
-    unsafe { VariantChangeType(&mut converted, &value, VAR_CHANGE_FLAGS(0), VT_R8) }.ok()?;
+    unsafe { VariantChangeType(&mut converted, value, VAR_CHANGE_FLAGS(0), VT_R8) }.ok()?;
     let vtime = f64::try_from(&converted).ok()?;
     let mut st = SYSTEMTIME::default();
     // SAFETY: `st` is a live local.

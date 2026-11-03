@@ -245,8 +245,8 @@ impl win::Session {
                 "subject":mail_text(&item,"Subject"),
                 "from":mail_text(&item,"SenderName"),
                 "from_address":super::table::public_address(&mail_text(&item,"SenderEmailAddress")),
-                "sent_local":mail_text(&item,"SentOn"),
-                "received_local":mail_text(&item,"ReceivedTime")
+                "sent":super::schedule::date_iso(&item,"SentOn"),
+                "received":super::schedule::date_iso(&item,"ReceivedTime")
             });
             if include_bodies {
                 let raw = mail_text(&item, "Body");

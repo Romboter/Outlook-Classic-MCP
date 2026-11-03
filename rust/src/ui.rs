@@ -57,50 +57,6 @@ const VIEWS: [View; 5] = [
     },
 ];
 
-/// Python's mail items carry an ISO `received`; Rust returns Outlook's text as `received_local`.
-/// The views call `new Date(received)` and fall back to showing the text as it is, so add
-/// `received`: ISO local time when the text has the `yyyy/mm/dd:hh:mm:ss` shape, else the
-/// text unchanged. Only the structured copy changes; the text for the model does not.
-pub fn add_received(value: &mut serde_json::Value) {
-    fn iso(text: &str) -> Option<String> {
-        let b = text.as_bytes();
-        let digits =
-            |r: std::ops::Range<usize>| b.get(r).is_some_and(|s| s.iter().all(u8::is_ascii_digit));
-        let shaped = b.len() >= 19
-            && digits(0..4)
-            && b[4] == b'/'
-            && digits(5..7)
-            && b[7] == b'/'
-            && digits(8..10)
-            && b[10] == b':'
-            && digits(11..13)
-            && b[13] == b':'
-            && digits(14..16)
-            && b[16] == b':'
-            && digits(17..19);
-        shaped.then(|| {
-            format!(
-                "{}-{}-{}T{}",
-                &text[0..4],
-                &text[5..7],
-                &text[8..10],
-                &text[11..19]
-            )
-        })
-    }
-    fn alias(item: &mut serde_json::Value) {
-        let Some(local) = item.get("received_local").and_then(|v| v.as_str()) else {
-            return;
-        };
-        let shown = iso(local).unwrap_or_else(|| local.to_string());
-        item["received"] = serde_json::Value::String(shown);
-    }
-    alias(value);
-    if let Some(items) = value.get_mut("items").and_then(|v| v.as_array_mut()) {
-        items.iter_mut().for_each(alias);
-    }
-}
-
 pub fn view_uri(name: &str) -> String {
     format!("ui://outlook/{name}.html")
 }
@@ -177,18 +133,6 @@ mod tests {
             );
         }
         assert!(read("ui://outlook/nope.html").is_none());
-    }
-
-    #[test]
-    fn received_alias_is_iso_when_shaped_and_raw_text_otherwise() {
-        let mut v = json!({"received_local": "2026/11/02:18:08:10.000", "items": [
-            {"received_local": "2026/11/02:18:08:10.000"}, {"received_local": "02.11.2026 18:08"}, {"subject": "x"}]});
-        add_received(&mut v);
-        assert_eq!(v["received"], "2026-11-02T18:08:10");
-        assert_eq!(v["items"][0]["received"], "2026-11-02T18:08:10");
-        assert_eq!(v["items"][1]["received"], "02.11.2026 18:08");
-        assert!(v["items"][2].get("received").is_none());
-        assert_eq!(v["items"][0]["received_local"], "2026/11/02:18:08:10.000");
     }
 
     #[test]

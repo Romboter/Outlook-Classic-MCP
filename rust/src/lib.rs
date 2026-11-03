@@ -427,8 +427,7 @@ impl OutlookMcp {
                 .first()
                 .and_then(|c| c.as_text())
                 .and_then(|t| serde_json::from_str::<serde_json::Value>(&t.text).ok());
-            if let Some(mut value @ serde_json::Value::Object(_)) = parsed {
-                ui::add_received(&mut value);
+            if let Some(value @ serde_json::Value::Object(_)) = parsed {
                 result.structured_content = Some(value);
             }
         }

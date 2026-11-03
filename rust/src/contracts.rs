@@ -572,6 +572,10 @@ pub fn prepare_respond_event(x: &RespondEventParams) -> Result<ActionTarget, Str
     })
 }
 
+pub fn prepare_cancel_meeting(x: &DeleteItemParams) -> Result<ActionTarget, String> {
+    prepare_delete(x, ActionKind::CancelMeeting)
+}
+
 pub fn prepare_delete(x: &DeleteItemParams, kind: ActionKind) -> Result<ActionTarget, String> {
     checked_id(&x.entry_id, x.store_id.as_deref())?;
     Ok(ActionTarget {

@@ -75,7 +75,9 @@ fn check_kind(item: &IDispatch, kind: ActionKind) -> Result<()> {
         ActionKind::DeleteEvent if class == 26 => Ok(()),
         ActionKind::DeleteMail => bail!("that EntryID does not identify a mail item"),
         ActionKind::DeleteEvent => bail!("that EntryID does not identify a calendar event"),
-        ActionKind::ToggleRule | ActionKind::RespondEvent => bail!("not an item to delete"),
+        ActionKind::ToggleRule | ActionKind::RespondEvent | ActionKind::CancelMeeting => {
+            bail!("not an item to delete")
+        }
     }
 }
 
@@ -91,7 +93,7 @@ fn check_allowed(namespace: &IDispatch, item: &IDispatch, target: &ActionTarget)
         && win::int_property(item, "MeetingStatus").unwrap_or(0) != 0
     {
         bail!(
-            "that event is a meeting with attendees; deleting it alone would leave it on their calendars, and cancelling meetings is not available yet"
+            "that event is a meeting with attendees; deleting it alone would leave it on their calendars, and use outlook_cancel_meeting, which tells them"
         );
     }
     Ok(())
@@ -153,7 +155,7 @@ fn facts_of(item: &IDispatch, kind: ActionKind) -> (String, Vec<Fact>, Vec<Strin
             )
         }
         // Rule changes are handled in rule.rs and never reach this function.
-        ActionKind::ToggleRule | ActionKind::RespondEvent => {
+        ActionKind::ToggleRule | ActionKind::RespondEvent | ActionKind::CancelMeeting => {
             (String::new(), vec![], vec![], String::new())
         }
     }

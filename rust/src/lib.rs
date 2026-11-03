@@ -5,6 +5,8 @@
 //! Outlook data is logged to stderr.
 pub mod action;
 pub mod contracts;
+#[cfg(windows)]
+pub mod dialog;
 pub mod localtime;
 pub mod outlook;
 pub mod policy;

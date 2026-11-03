@@ -11,6 +11,9 @@ const CANCELLED: u8 = 3;
 /// Prefix on error strings that mean "may or may not have happened".
 pub const UNKNOWN_OUTCOME: &str = "unknown_outcome: ";
 
+/// Prefix on error strings that mean "provably did not happen".
+pub const NOT_SENT: &str = "not_sent: ";
+
 #[derive(Debug, Default)]
 pub struct Ticket(AtomicU8);
 

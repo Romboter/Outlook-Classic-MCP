@@ -1,7 +1,9 @@
 //! Local stdio MCP entry point. Never print logs to stdout.
 
 use anyhow::Result;
-use outlook_classic_mcp_rs::{OutlookMcp, outlook::OutlookBridge, policy::Policy};
+use outlook_classic_mcp_rs::{
+    OutlookMcp, outlook::OutlookBridge, policy::Policy, send::SendSettings,
+};
 use rmcp::{ServiceExt, transport::stdio};
 
 #[tokio::main]
@@ -14,7 +16,7 @@ async fn main() -> Result<()> {
         }
         (Some(flag), None) if flag == "--help" || flag == "-h" => {
             println!(
-                "outlook-mcp-rs [--help|--version|--probe-outlook|--probe-first-mail]\n\nWith no arguments, serves a local MCP stdio connection.\nExperimental read-only MCP tools are enabled; no write operations exist yet. Outlook Classic must already be running.\n\nPermission mode comes only from the server environment and is read-only by default:\n  OUTLOOK_MCP_MODE = read-only | draft | full\n  OUTLOOK_MCP_DENY = comma list from modify,draft,send,delete,rules,events,files\nUnrecognized values stop the server."
+                "outlook-mcp-rs [--help|--version|--probe-outlook|--probe-first-mail]\n\nWith no arguments, serves a local MCP stdio connection.\nExperimental read-only MCP tools are enabled; no write operations exist yet. Outlook Classic must already be running.\n\nPermission mode comes only from the server environment and is read-only by default:\n  OUTLOOK_MCP_MODE = read-only | draft | full\n  OUTLOOK_MCP_DENY = comma list from modify,draft,send,delete,rules,events,files\nSend limits (prompts, not walls): OUTLOOK_MCP_SEND_MAX_RECIPIENTS (20), OUTLOOK_MCP_SEND_PER_HOUR (5), OUTLOOK_MCP_SEND_ALLOW_DOMAINS, OUTLOOK_MCP_SEND_STRICT=1 (refuse instead of prompt); hard ceilings OUTLOOK_MCP_SEND_HARD_MAX_RECIPIENTS (200) and OUTLOOK_MCP_SEND_HARD_MAX_PER_HOUR (25).\nUnrecognized values stop the server."
             );
             return Ok(());
         }
@@ -37,7 +39,10 @@ async fn main() -> Result<()> {
         "outlook-mcp-rs: experimental Outlook Classic MCP, permission mode: {}; no live COM validation yet",
         policy.describe()
     );
-    let server = OutlookMcp::with_policy(policy).serve(stdio()).await?;
+    let send_settings = SendSettings::from_env().map_err(anyhow::Error::msg)?;
+    let server = OutlookMcp::with_settings(policy, send_settings)
+        .serve(stdio())
+        .await?;
     server.waiting().await?;
     Ok(())
 }

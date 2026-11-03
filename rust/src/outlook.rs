@@ -3,9 +3,12 @@
 //! This is intentionally separate from the MCP tools until issue #4. No mail
 //! mutation operations or live mailbox tools are exposed by this module.
 use crate::contracts::{MailCommand, validate_command};
-use crate::ticket::{Ticket, TimeoutVerdict, UNKNOWN_OUTCOME, timeout_verdict};
+use crate::ticket::{NOT_SENT, Ticket, TimeoutVerdict, UNKNOWN_OUTCOME, timeout_verdict};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
+#[cfg(windows)]
+#[path = "outlook/compose.rs"]
+mod compose;
 #[cfg(windows)]
 #[path = "outlook/directory.rs"]
 mod directory;
@@ -50,6 +53,8 @@ pub struct OutlookProbe {
     pub first_item_subject: Option<String>,
 }
 
+// One short-lived message per request; boxing would only add an allocation.
+#[allow(clippy::large_enum_variant)]
 enum Request {
     Probe {
         include_first_subject: bool,
@@ -129,7 +134,7 @@ impl OutlookBridge {
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 match timeout_verdict(ticket.cancel(), idempotent) {
                     TimeoutVerdict::NotExecuted => bail!(
-                        "Outlook request timed out while queued and was cancelled; it was not executed."
+                        "{NOT_SENT}Outlook request timed out while queued and was cancelled; it was not executed."
                     ),
                     TimeoutVerdict::ReadStillRunning => bail!(
                         "Read-only Outlook request timed out; Outlook may be showing a dialog. Request may finish later."
@@ -195,9 +200,9 @@ fn run_worker(receiver: Receiver<Request>) {
             } => {
                 // The caller may have given up while this was queued.
                 if !ticket.start() {
-                    let _ = response.send(Err(
-                        "request was cancelled before it started; it was not executed".into(),
-                    ));
+                    let _ = response.send(Err(format!(
+                        "{NOT_SENT}request was cancelled before it started; it was not executed"
+                    )));
                     continue;
                 }
                 let result = match &initialization {
@@ -233,7 +238,7 @@ fn run_worker(receiver: Receiver<Request>) {
                                 Err(error) => Err(error),
                             },
                             None => Err(anyhow::anyhow!(
-                                "Outlook Classic is not running or its COM session is unavailable"
+                                "Outlook Classic is not running or its COM session is unavailable. If Outlook is open, close it and reopen it from the Start menu: an Outlook started by automation does not register itself"
                             )),
                         }
                     }
@@ -504,7 +509,7 @@ mod win {
                 .context("Outlook Classic is not registered")?;
             let mut unknown: Option<IUnknown> = None;
             unsafe { GetActiveObject(&clsid, None, &mut unknown) }
-                .context("Outlook Classic is not running or is not registered in the COM Running Object Table")?;
+                .context("Outlook Classic is not running, or it is not in the COM Running Object Table. If Outlook is open, close it and reopen it from the Start menu: an Outlook started by automation does not register itself")?;
             let application: IDispatch =
                 unknown
                     .context("GetActiveObject returned null")?

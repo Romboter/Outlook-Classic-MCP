@@ -15,6 +15,7 @@ pub mod safe_path;
 pub mod send;
 pub mod thread_text;
 pub mod ticket;
+pub mod ui;
 
 use action::{
     ActionEngine, ActionKind, ActionLedger, ActionPort, ActionPreview, ActionSettings,
@@ -417,6 +418,23 @@ impl OutlookMcp {
         outcome_result(self.action_engine(peer).run(target).await)
     }
 
+    /// Like `call`, plus the parsed result as `structuredContent` for MCP Apps views.
+    async fn call_ui(&self, cmd: MailCommand) -> CallToolResult {
+        let mut result = self.call(cmd).await;
+        if result.is_error != Some(true) {
+            let parsed = result
+                .content
+                .first()
+                .and_then(|c| c.as_text())
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t.text).ok());
+            if let Some(mut value @ serde_json::Value::Object(_)) = parsed {
+                ui::add_received(&mut value);
+                result.structured_content = Some(value);
+            }
+        }
+        result
+    }
+
     async fn call(&self, cmd: MailCommand) -> CallToolResult {
         match self.raw_call(cmd).await {
             Ok(value) => CallToolResult::success(vec![ContentBlock::text(value.to_string())]),
@@ -479,23 +497,25 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "List up to 30 metadata-only mail summaries in one folder. EntryID fields are short session-scoped m1-style handles; call get_mail with a returned handle. Backends auto/table/legacy."
+        description = "List up to 30 metadata-only mail summaries in one folder. EntryID fields are short session-scoped m1-style handles; call get_mail with a returned handle. Backends auto/table/legacy.",
+        meta = ui::tool_meta("mail-list")
     )]
     async fn outlook_list_mails(
         &self,
         Parameters(params): Parameters<ListMailsParams>,
     ) -> CallToolResult {
-        self.call(MailCommand::ListMails(params)).await
+        self.call_ui(MailCommand::ListMails(params)).await
     }
 
     #[tool(
-        description = "Search one Outlook Classic folder and return compact metadata-only hits with session-scoped m1-style handles instead of long EntryIDs/StoreIDs. Backends auto/table/legacy/indexed (indexed is experimental, requires Instant Search and waits for completion event); elapsed_ms is measured."
+        description = "Search one Outlook Classic folder and return compact metadata-only hits with session-scoped m1-style handles instead of long EntryIDs/StoreIDs. Backends auto/table/legacy/indexed (indexed is experimental, requires Instant Search and waits for completion event); elapsed_ms is measured.",
+        meta = ui::tool_meta("mail-list")
     )]
     async fn outlook_search_mails(
         &self,
         Parameters(params): Parameters<SearchMailsParams>,
     ) -> CallToolResult {
-        self.call(MailCommand::SearchMails(params)).await
+        self.call_ui(MailCommand::SearchMails(params)).await
     }
 
     #[tool(
@@ -509,33 +529,36 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Read one Outlook Classic email. Pass the short entry_id handle returned by search/list (e.g. m1); legacy raw EntryIDs also work. Bounded plain-text body; HTML disabled."
+        description = "Read one Outlook Classic email. Pass the short entry_id handle returned by search/list (e.g. m1); legacy raw EntryIDs also work. Bounded plain-text body; HTML disabled.",
+        meta = ui::tool_meta("mail-view")
     )]
     async fn outlook_get_mail(
         &self,
         Parameters(params): Parameters<GetMailParams>,
     ) -> CallToolResult {
-        self.call(MailCommand::GetMail(params)).await
+        self.call_ui(MailCommand::GetMail(params)).await
     }
 
     #[tool(
-        description = "List contacts from every contact folder in every store, sorted by name. Bounded (default 50, max 200; scan_truncated reports hitting the scan budget). entry_id is a short session handle; call outlook_get_contact."
+        description = "List contacts from every contact folder in every store, sorted by name. Bounded (default 50, max 200; scan_truncated reports hitting the scan budget). entry_id is a short session handle; call outlook_get_contact.",
+        meta = ui::tool_meta("contacts")
     )]
     async fn outlook_list_contacts(
         &self,
         Parameters(params): Parameters<ListContactsParams>,
     ) -> CallToolResult {
-        self.call(MailCommand::ListContacts(params)).await
+        self.call_ui(MailCommand::ListContacts(params)).await
     }
 
     #[tool(
-        description = "Search contact folders and, by default, the Exchange Global Address List. All query words must match name, email, company or job title. Bounded scans; scan_truncated reports a partial search."
+        description = "Search contact folders and, by default, the Exchange Global Address List. All query words must match name, email, company or job title. Bounded scans; scan_truncated reports a partial search.",
+        meta = ui::tool_meta("contacts")
     )]
     async fn outlook_search_contacts(
         &self,
         Parameters(params): Parameters<SearchContactsParams>,
     ) -> CallToolResult {
-        self.call(MailCommand::SearchContacts(params)).await
+        self.call_ui(MailCommand::SearchContacts(params)).await
     }
 
     #[tool(
@@ -559,13 +582,14 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "List calendar events in a bounded local-time window (default now to +14 days; limit default 50, max 200). Recurring series are expanded by default. Pass local ISO-8601 times or times with a UTC offset (converted to local); results carry the local offset. entry_id is a short session handle."
+        description = "List calendar events in a bounded local-time window (default now to +14 days; limit default 50, max 200). Recurring series are expanded by default. Pass local ISO-8601 times or times with a UTC offset (converted to local); results carry the local offset. entry_id is a short session handle.",
+        meta = ui::tool_meta("calendar")
     )]
     async fn outlook_list_events(
         &self,
         Parameters(params): Parameters<ListEventsParams>,
     ) -> CallToolResult {
-        self.call(MailCommand::ListEvents(params)).await
+        self.call_ui(MailCommand::ListEvents(params)).await
     }
 
     #[tool(
@@ -579,13 +603,14 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "List tasks from the default Tasks folder sorted by due date (limit default 50, max 200). Completed tasks are excluded unless include_completed is true. Tasks without a date report null."
+        description = "List tasks from the default Tasks folder sorted by due date (limit default 50, max 200). Completed tasks are excluded unless include_completed is true. Tasks without a date report null.",
+        meta = ui::tool_meta("tasks")
     )]
     async fn outlook_list_tasks(
         &self,
         Parameters(params): Parameters<ListTasksParams>,
     ) -> CallToolResult {
-        self.call(MailCommand::ListTasks(params)).await
+        self.call_ui(MailCommand::ListTasks(params)).await
     }
 
     #[tool(
@@ -1027,12 +1052,44 @@ impl OutlookMcp {
     }
 }
 
-#[tool_handler(
-    name = "outlook-classic-mcp-rs",
-    version = "0.1.0",
-    instructions = "Experimental Outlook Classic MCP; read-only unless the user started the server in a wider permission mode (see outlook_rust_status). Requires locally running Outlook Classic on Windows. No sends/deletes or OST parsing. Search/list results contain short session-scoped entry_id handles instead of raw COM IDs; fetch a selected message with outlook_get_mail. Responses are compact JSON. Do not claim this build has passed live Outlook testing."
-)]
-impl ServerHandler for OutlookMcp {}
+const INSTRUCTIONS: &str = "Experimental Outlook Classic MCP; read-only unless the user started the server in a wider permission mode (see outlook_rust_status). Requires locally running Outlook Classic on Windows. No sends/deletes or OST parsing. Search/list results contain short session-scoped entry_id handles instead of raw COM IDs; fetch a selected message with outlook_get_mail. Responses are compact JSON. Do not claim this build has passed live Outlook testing.";
+
+#[tool_handler]
+impl ServerHandler for OutlookMcp {
+    fn get_info(&self) -> rmcp::model::ServerConfig {
+        rmcp::model::ServerConfig::new(
+            rmcp::model::ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+        )
+        .with_server_info(rmcp::model::Implementation::new(
+            "outlook-classic-mcp-rs",
+            "0.1.0",
+        ))
+        .with_instructions(INSTRUCTIONS.to_string())
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: rmcp::service::RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ListResourcesResult, rmcp::ErrorData> {
+        Ok(rmcp::model::ListResourcesResult::with_all_items(
+            ui::resources(),
+        ))
+    }
+
+    async fn read_resource(
+        &self,
+        request: rmcp::model::ReadResourceRequestParams,
+        _context: rmcp::service::RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ReadResourceResponse, rmcp::ErrorData> {
+        ui::read(&request.uri).map(Into::into).ok_or_else(|| {
+            rmcp::ErrorData::resource_not_found(format!("unknown resource {}", request.uri), None)
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {

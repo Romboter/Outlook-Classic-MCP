@@ -66,3 +66,10 @@ Do not assume sample `m1` exists: use the handle returned in *your* current MCP 
 - No `outlook_send_mail`, delete, move, calendar writes, file saves, or similar Rust mutation tools are registered.
 
 For the **existing Python** 31-tool inventory, consult [`rust/compatibility/tools.md`](../rust/compatibility/tools.md). That list is a migration target, not the number of currently implemented Rust tools.
+
+
+## MCP Apps views (issue #10, draft)
+
+The server declares the `resources` capability and serves the Python server's five views (`src/outlook_mcp/ui/`, one shared copy) as `ui://outlook/{mail-list,mail-view,calendar,contacts,tasks}.html` with MIME `text/html;profile=mcp-app`. `outlook_list_mails` and `outlook_search_mails` link `mail-list`, `outlook_get_mail` links `mail-view`, `outlook_list_events` links `calendar`, `outlook_list_contacts` and `outlook_search_contacts` link `contacts`, `outlook_list_tasks` links `tasks` through `_meta.ui.resourceUri`. Those tools also return the same JSON as `structuredContent`; mail results gain a `received` field (ISO local time when Outlook's text has the `yyyy/mm/dd:hh:mm:ss` shape, else the text unchanged) next to `received_local`. Clients without MCP Apps support ignore all of this.
+
+**Known gaps:** Rust mail results have no `flagged`, `has_attachments`, `preview` or `attachments`, so those parts of the mail views stay empty. Buttons in the views call tools back; write tools in them still need server mode `full` and the approval window. **Not tested in any client that renders MCP Apps.** Verified only at protocol level (capability, tool metadata, resource list and read, `structuredContent`) with a script.

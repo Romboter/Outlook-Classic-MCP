@@ -17,6 +17,29 @@ use windows::{
 
 const MESSAGE_FLAGS: &str = "http://schemas.microsoft.com/mapi/proptag/0x0E070003";
 const MAX_SCANNED: usize = 10_000;
+// Table columns for triage fields (PR_DISPLAY_TO, PR_FLAG_STATUS, PR_IMPORTANCE, body text).
+// A table cell holds at most 255 characters of body, enough for the preview.
+const DISPLAY_TO: &str = "http://schemas.microsoft.com/mapi/proptag/0x0E04001F";
+const FLAG_STATUS: &str = "http://schemas.microsoft.com/mapi/proptag/0x10900003";
+// PR_HASATTACH disagreed with Attachments.Count in live checks; the message flag matched it.
+const MSGFLAG_HASATTACH: i32 = 0x10;
+const IMPORTANCE: &str = "http://schemas.microsoft.com/mapi/proptag/0x00170003";
+const BODY_TEXT: &str = "urn:schemas:httpmail:textdescription";
+const PREVIEW_CHARS: usize = 200;
+
+/// First 200 characters of a body on one line, like the Python `preview`.
+pub fn preview_text(raw: &str) -> String {
+    raw.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(PREVIEW_CHARS)
+        .collect()
+}
+
+fn add_column(columns: &IDispatch, name: &str) -> bool {
+    win::invoke(columns, "Add", DISPATCH_METHOD, vec![VARIANT::from(name)]).is_ok()
+}
 
 #[derive(Debug, Clone)]
 pub struct RowOptions<'a> {
@@ -67,10 +90,13 @@ fn text(row: &IDispatch, name: &str) -> String {
         .unwrap_or_default()
 }
 
+fn message_flags(row: &IDispatch) -> Option<i32> {
+    i32::try_from(&cell(row, MESSAGE_FLAGS)?).ok()
+}
+
 fn unread(row: &IDispatch) -> Option<bool> {
-    let flags = i32::try_from(&cell(row, MESSAGE_FLAGS)?).ok()?;
     // PR_MESSAGE_FLAGS MSGFLAG_READ is bit zero.
-    Some(flags & 1 == 0)
+    Some(message_flags(row)? & 1 == 0)
 }
 
 /// Exchange-internal senders report an X.500 DN (`/O=...`), not an SMTP address.
@@ -158,6 +184,12 @@ pub fn enumerate_existing(
         vec![VARIANT::from(SENDER_SMTP)],
     )
     .is_ok();
+    let [
+        to_available,
+        flag_available,
+        importance_available,
+        preview_available,
+    ] = [DISPLAY_TO, FLAG_STATUS, IMPORTANCE, BODY_TEXT].map(|column| add_column(&columns, column));
     let flags_available = win::invoke(
         &columns,
         "Add",
@@ -269,7 +301,20 @@ pub fn enumerate_existing(
             "from": sender_name,
             "from_address": public_address(&sender_address),
             "received": cell(&row, "ReceivedTime").as_ref().and_then(super::schedule::variant_iso),
-            "unread": unread_state
+            "unread": unread_state,
+            "to": to_available.then(|| text(&row, DISPLAY_TO)),
+            "flagged": flag_available
+                .then(|| cell(&row, FLAG_STATUS).and_then(|v| i32::try_from(&v).ok()))
+                .flatten()
+                .map(|status| status == 2),
+            "has_attachments": flags_available
+                .then(|| message_flags(&row))
+                .flatten()
+                .map(|flags| flags & MSGFLAG_HASATTACH != 0),
+            "importance": importance_available
+                .then(|| cell(&row, IMPORTANCE).and_then(|v| i32::try_from(&v).ok()))
+                .flatten(),
+            "preview": preview_available.then(|| preview_text(&text(&row, BODY_TEXT)))
         }));
     }
 
@@ -304,6 +349,15 @@ mod tests {
             resolve_sender_address("a@b.com", Some("c@d.com".into())),
             "a@b.com"
         );
+    }
+    #[test]
+    fn preview_is_one_line_and_capped() {
+        assert_eq!(preview_text("  Hi\r\n\r\nthere \t you  "), "Hi there you");
+        assert_eq!(
+            preview_text(&"ab ".repeat(200)).chars().count(),
+            PREVIEW_CHARS
+        );
+        assert_eq!(preview_text(""), "");
     }
     #[test]
     fn table_scan_cap_is_bounded() {

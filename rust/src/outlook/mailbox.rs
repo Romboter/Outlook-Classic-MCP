@@ -167,7 +167,9 @@ fn collect_items(
         if hits.len() >= limit {
             return Ok((hits, true));
         }
-        hits.push(item_summary(&item, store_id));
+        let mut row = item_summary(&item, store_id);
+        add_triage_fields(&item, &mut row);
+        hits.push(row);
     }
     Ok((hits, false))
 }
@@ -415,6 +417,19 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
         "instant_search_enabled": instant_search_enabled,
         "elapsed_ms": started.elapsed().as_millis()
     }))
+}
+
+/// Triage fields list and search rows carry besides the summary: `to`, `flagged`,
+/// `has_attachments`, `importance` and a one-line `preview`.
+fn add_triage_fields(item: &IDispatch, row: &mut Value) {
+    let attachments = win::object_property(item, "Attachments")
+        .ok()
+        .and_then(|a| win::int_property(&a, "Count").ok());
+    row["to"] = json!(optional_text(item, "To"));
+    row["flagged"] = json!(is_flagged(item));
+    row["has_attachments"] = json!(attachments.map(|n| n > 0));
+    row["importance"] = json!(win::int_property(item, "Importance").ok());
+    row["preview"] = json!(table::preview_text(&optional_text(item, "Body")));
 }
 
 /// `OlFlagStatus.olFlagMarked`.

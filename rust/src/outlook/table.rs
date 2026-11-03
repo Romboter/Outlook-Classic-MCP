@@ -4,6 +4,7 @@
 //! Folder.GetTable is a provider-backed rowset, NOT necessarily an indexed
 //! full-text search. Cross-folder indexed AdvancedSearch is a later step.
 use super::win;
+use crate::contracts::has_all_words;
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use windows::{
@@ -24,6 +25,15 @@ pub struct RowOptions<'a> {
     pub offset: usize,
     pub unread_only: bool,
     pub sender_substring: Option<&'a str>,
+    /// Words that must all appear in the row's subject or sender (lowercase).
+    pub words: Option<(&'a [String], WordScope)>,
+}
+
+/// Which row text extra search words must appear in.
+#[derive(Debug, Clone, Copy)]
+pub enum WordScope {
+    Subject,
+    Sender,
 }
 
 pub struct RowPage {
@@ -230,6 +240,16 @@ pub fn enumerate_existing(
         {
             continue;
         }
+        let subject = text(&row, "Subject");
+        if let Some((words, scope)) = options.words {
+            let haystack = match scope {
+                WordScope::Subject => subject.to_lowercase(),
+                WordScope::Sender => format!("{sender_name} {sender_address}").to_lowercase(),
+            };
+            if !has_all_words(&haystack, words) {
+                continue;
+            }
+        }
         if skipped < options.offset {
             skipped += 1;
             continue;
@@ -245,7 +265,7 @@ pub fn enumerate_existing(
         collected.push(json!({
             "entry_id": entry_id,
             "store_id": store_id,
-            "subject": text(&row, "Subject"),
+            "subject": subject,
             "from": sender_name,
             "from_address": public_address(&sender_address),
             "received": cell(&row, "ReceivedTime").as_ref().and_then(super::schedule::variant_iso),

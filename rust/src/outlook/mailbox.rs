@@ -3,8 +3,10 @@
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
 use super::{
-    MailCommand, compose, delete, directory, indexed, modify, schedule, schedule_write, table, win,
+    MailCommand, compose, delete, directory, indexed, modify, rule, schedule, schedule_write,
+    table, win,
 };
+use crate::action::ActionKind;
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
 };
@@ -435,6 +437,22 @@ impl win::Session {
                 (params.entry_id, params.store_id) =
                     self.resolve_ids(&params.entry_id, &params.store_id)?;
                 schedule_write::update_event(&self.namespace, params)
+            }
+            // Rules are named, not addressed by item id, so nothing is resolved.
+            MailCommand::ActionPrepare(target) if target.kind == ActionKind::ToggleRule => {
+                rule::prepare(&self.namespace, &target)
+            }
+            MailCommand::ActionExecute { target, preview }
+                if target.kind == ActionKind::ToggleRule =>
+            {
+                rule::execute(&self.namespace, &target, &preview)
+            }
+            MailCommand::ActionLocate { target, .. }
+                if target
+                    .as_ref()
+                    .is_some_and(|t| t.kind == ActionKind::ToggleRule) =>
+            {
+                rule::locate(&self.namespace, target.as_ref())
             }
             MailCommand::ActionPrepare(mut target) => {
                 (target.entry_id, target.store_id) =

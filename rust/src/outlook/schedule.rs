@@ -295,6 +295,35 @@ pub(super) fn get_event(namespace: &IDispatch, params: GetEventParams) -> Result
         "categories".into(),
         json!(optional_text(&event, "Categories")),
     );
+    // OlMeetingStatus: 0 none, 1 meeting, 3 received, 5 canceled, 7 received+canceled.
+    object.insert(
+        "meeting_status".into(),
+        json!(win::int_property(&event, "MeetingStatus").ok()),
+    );
+    // OlResponseStatus for the mailbox owner: 0 none, 1 organized, 2 tentative, 3 accepted, 4 declined, 5 not responded.
+    object.insert(
+        "my_response".into(),
+        json!(win::int_property(&event, "ResponseStatus").ok()),
+    );
+    object.insert(
+        "organizer".into(),
+        json!(optional_text(&event, "Organizer")),
+    );
+    let recurring = super::mailbox::bool_property(&event, "IsRecurring");
+    object.insert("is_recurring".into(), json!(recurring));
+    if recurring && let Ok(pattern) = win::method_object(&event, "GetRecurrencePattern", vec![]) {
+        // OlRecurrenceType: 0 daily, 1 weekly, 2 monthly, 3 month-nth, 5 yearly, 6 year-nth.
+        object.insert(
+            "recurrence".into(),
+            json!({
+                "type": win::int_property(&pattern, "RecurrenceType").ok(),
+                "interval": win::int_property(&pattern, "Interval").ok(),
+                "days_of_week_mask": win::int_property(&pattern, "DaysOfWeekMask").ok(),
+                "no_end_date": super::mailbox::bool_property(&pattern, "NoEndDate"),
+                "occurrences": win::int_property(&pattern, "Occurrences").ok(),
+            }),
+        );
+    }
     Ok(data)
 }
 

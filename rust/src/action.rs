@@ -113,6 +113,7 @@ pub enum ActionKind {
     DeleteEvent,
     ToggleRule,
     RespondEvent,
+    CancelMeeting,
 }
 
 impl ActionKind {
@@ -122,13 +123,17 @@ impl ActionKind {
             ActionKind::DeleteEvent => "delete_event",
             ActionKind::ToggleRule => "toggle_rule",
             ActionKind::RespondEvent => "respond_event",
+            ActionKind::CancelMeeting => "cancel_meeting",
         }
     }
 
     /// Actions in one class share an hourly counter.
     fn class(self) -> &'static str {
         match self {
-            ActionKind::DeleteMail | ActionKind::DeleteEvent => "deletes",
+            // Cancelling removes the event, so it shares the delete counter.
+            ActionKind::DeleteMail | ActionKind::DeleteEvent | ActionKind::CancelMeeting => {
+                "deletes"
+            }
             ActionKind::ToggleRule => "rules",
             ActionKind::RespondEvent => "responses",
         }
@@ -164,7 +169,7 @@ impl ActionTarget {
             ActionKind::DeleteMail | ActionKind::DeleteEvent => Capability::Delete,
             ActionKind::ToggleRule => Capability::Rules,
             ActionKind::RespondEvent if self.enabled == Some(false) => Capability::Events,
-            ActionKind::RespondEvent => Capability::Send,
+            ActionKind::RespondEvent | ActionKind::CancelMeeting => Capability::Send,
         }
     }
 }
@@ -800,6 +805,7 @@ mod tests {
         assert_eq!(of(ActionKind::DeleteMail, None), Capability::Delete);
         assert_eq!(of(ActionKind::DeleteEvent, None), Capability::Delete);
         assert_eq!(of(ActionKind::ToggleRule, Some(true)), Capability::Rules);
+        assert_eq!(of(ActionKind::CancelMeeting, None), Capability::Send);
         assert_eq!(of(ActionKind::RespondEvent, Some(true)), Capability::Send);
         assert_eq!(of(ActionKind::RespondEvent, None), Capability::Send);
         assert_eq!(

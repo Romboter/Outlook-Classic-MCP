@@ -7,6 +7,9 @@ use crate::ticket::{NOT_SENT, Ticket, TimeoutVerdict, UNKNOWN_OUTCOME, timeout_v
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 #[cfg(windows)]
+#[path = "outlook/cancel.rs"]
+mod cancel;
+#[cfg(windows)]
 #[path = "outlook/compose.rs"]
 mod compose;
 #[cfg(windows)]

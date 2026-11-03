@@ -3,7 +3,7 @@
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
 use super::{
-    MailCommand, compose, delete, directory, indexed, modify, respond, rule, schedule,
+    MailCommand, cancel, compose, delete, directory, indexed, modify, respond, rule, schedule,
     schedule_write, table, win,
 };
 use crate::action::ActionKind;
@@ -437,6 +437,31 @@ impl win::Session {
                 (params.entry_id, params.store_id) =
                     self.resolve_ids(&params.entry_id, &params.store_id)?;
                 schedule_write::update_event(&self.namespace, params)
+            }
+            MailCommand::ActionPrepare(mut target) if target.kind == ActionKind::CancelMeeting => {
+                (target.entry_id, target.store_id) =
+                    self.resolve_ids(&target.entry_id, &target.store_id)?;
+                cancel::prepare(&self.namespace, &target)
+            }
+            MailCommand::ActionExecute {
+                mut target,
+                preview,
+            } if target.kind == ActionKind::CancelMeeting => {
+                (target.entry_id, target.store_id) =
+                    self.resolve_ids(&target.entry_id, &target.store_id)?;
+                cancel::execute(&self.namespace, &target, &preview)
+            }
+            MailCommand::ActionLocate {
+                action_id,
+                mut target,
+            } if target
+                .as_ref()
+                .is_some_and(|t| t.kind == ActionKind::CancelMeeting) =>
+            {
+                if let Some(t) = target.as_mut() {
+                    (t.entry_id, t.store_id) = self.resolve_ids(&t.entry_id, &t.store_id)?;
+                }
+                cancel::locate(&self.namespace, &action_id, target.as_ref())
             }
             MailCommand::ActionPrepare(mut target) if target.kind == ActionKind::RespondEvent => {
                 (target.entry_id, target.store_id) =

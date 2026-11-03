@@ -315,6 +315,8 @@ pub fn search(
             offset: 0,
             unread_only: false,
             sender_substring: None,
+            // ponytail: indexed keeps whole-phrase ci_phrasematch; all-words matching is for the table and legacy paths
+            words: None,
         },
     )?;
     drop(subscription);

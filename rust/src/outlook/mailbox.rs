@@ -9,6 +9,7 @@ use super::{
 use crate::action::ActionKind;
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
+    has_all_words, split_search_words,
 };
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -122,6 +123,7 @@ fn collect_items(
     offset: usize,
     unread_only: bool,
     sender_filter: Option<&str>,
+    words: Option<(&[String], &str)>,
 ) -> Result<(Vec<Value>, bool)> {
     let count = win::int_property(items, "Count")?.max(0) as usize;
     let mut hits = Vec::with_capacity(limit);
@@ -153,6 +155,11 @@ fn collect_items(
                 continue;
             }
         }
+        if let Some((words, scope)) = words
+            && !has_all_words(&item_haystack(&item, scope), words)
+        {
+            continue;
+        }
         if matched < offset {
             matched += 1;
             continue;
@@ -163,6 +170,24 @@ fn collect_items(
         hits.push(item_summary(&item, store_id));
     }
     Ok((hits, false))
+}
+
+/// Lowercased text the search `scope` looks in, like Python's `_search_haystack`.
+fn item_haystack(item: &IDispatch, scope: &str) -> String {
+    let text = match scope {
+        "subject" => optional_text(item, "Subject"),
+        "from" => format!(
+            "{} {}",
+            optional_text(item, "SenderName"),
+            sender_address(item)
+        ),
+        _ => format!(
+            "{} {}",
+            optional_text(item, "Subject"),
+            optional_text(item, "Body")
+        ),
+    };
+    text.to_lowercase()
 }
 
 fn sort_received(items: &IDispatch) -> Result<()> {
@@ -250,6 +275,7 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
                 offset,
                 unread_only: params.unread_only.unwrap_or(false),
                 sender_substring: params.from_address.as_deref(),
+                words: None,
             },
         ))
     };
@@ -284,6 +310,7 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
                 offset,
                 params.unread_only.unwrap_or(false),
                 params.from_address.as_deref(),
+                None,
             )?;
             Ok(json!({
                 "folder": folder_name, "count": rows.len(), "limit": limit,
@@ -304,7 +331,9 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
     let store_id = optional_text(&folder, "StoreID");
     let folder_name = optional_text(&folder, "Name");
     let instant_search_enabled = table::store_instant_search(&folder);
-    let safe_query = escape_dasl(params.query.trim());
+    // Several words: filter on the most selective one, then require the rest per row/item.
+    let (anchor, remaining) = split_search_words(params.query.trim());
+    let safe_query = escape_dasl(&anchor);
     let scope = params.scope.as_deref().unwrap_or("subject_body");
     let backend = params.backend.as_deref().unwrap_or("auto");
     if backend == "indexed" {
@@ -342,6 +371,14 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
                 offset: 0,
                 unread_only: false,
                 sender_substring: None,
+                words: (!remaining.is_empty()).then_some((
+                    remaining.as_slice(),
+                    if scope == "from" {
+                        table::WordScope::Sender
+                    } else {
+                        table::WordScope::Subject
+                    },
+                )),
             },
         ) {
             Ok(page) => {
@@ -361,7 +398,15 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
     let items = win::object_property(&folder, "Items")?;
     let restricted = win::method_object(&items, "Restrict", vec![VARIANT::from(filter.as_str())])?;
     sort_received(&restricted)?;
-    let (rows, has_more) = collect_items(&restricted, &store_id, limit, 0, false, None)?;
+    let (rows, has_more) = collect_items(
+        &restricted,
+        &store_id,
+        limit,
+        0,
+        false,
+        None,
+        (!remaining.is_empty()).then_some((remaining.as_slice(), scope)),
+    )?;
     Ok(json!({
         "query": params.query, "scope": scope, "folder": folder_name,
         "count": rows.len(), "has_more": has_more, "items": rows,

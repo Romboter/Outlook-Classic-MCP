@@ -1078,6 +1078,29 @@ pub fn received_filter(since: Option<&str>, until: Option<&str>) -> Result<Strin
     Ok(clauses.join(" AND "))
 }
 
+/// Split a search query into (anchor, remaining words), lowercased, like Python.
+/// The anchor is the longest word (first on ties): the most selective term to
+/// push into the Outlook filter. The remaining words are then required per
+/// item, because ANDing two LIKEs on one property returns nothing in Outlook.
+pub fn split_search_words(query: &str) -> (String, Vec<String>) {
+    let mut words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if words.is_empty() {
+        return (query.to_lowercase(), words);
+    }
+    let longest = words.iter().map(|w| w.chars().count()).max().unwrap_or(0);
+    let at = words
+        .iter()
+        .position(|w| w.chars().count() == longest)
+        .unwrap_or(0);
+    let anchor = words.remove(at);
+    (anchor, words)
+}
+
+/// True when every word occurs in the (already lowercased) haystack.
+pub fn has_all_words(haystack: &str, words: &[String]) -> bool {
+    words.iter().all(|w| haystack.contains(w.as_str()))
+}
+
 pub fn escape_dasl(raw: &str) -> String {
     // User text is always a single-quoted DASL literal; double apostrophes
     // to prevent injection. Double quotes inside the value are harmless and
@@ -1099,6 +1122,29 @@ mod tests {
             received_filter(Some("2026-11-02"), Some("2026-11-03T14:30")).unwrap(),
             "[ReceivedTime] >= '11/02/2026 12:00 AM' AND [ReceivedTime] <= '11/03/2026 02:30 PM'"
         );
+    }
+    #[test]
+    fn search_words_pick_the_longest_as_anchor() {
+        let (anchor, rest) = split_search_words("Budget  the FORECAST");
+        assert_eq!(
+            (anchor.as_str(), rest),
+            ("forecast", vec!["budget".to_string(), "the".to_string()])
+        );
+        // First of equal-length words wins, as in Python.
+        let (anchor, rest) = split_search_words("alpha beta");
+        assert_eq!((anchor.as_str(), rest), ("alpha", vec!["beta".to_string()]));
+        // One word has nothing left to verify.
+        assert_eq!(
+            split_search_words("invoice"),
+            ("invoice".to_string(), vec![])
+        );
+    }
+    #[test]
+    fn all_words_must_appear_anywhere() {
+        let words = vec!["budget".to_string(), "q3".to_string()];
+        assert!(has_all_words("q3 forecast for the budget", &words));
+        assert!(!has_all_words("budget forecast", &words));
+        assert!(has_all_words("anything", &[]));
     }
     #[test]
     fn received_filter_rejects_bad_or_reversed_bounds() {

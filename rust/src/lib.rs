@@ -7,7 +7,8 @@ pub mod outlook;
 pub mod thread_text;
 
 use contracts::{
-    FolderParams, GetMailParams, ListMailsParams, MailCommand, SearchMailsParams, ThreadParams,
+    FolderParams, GetContactParams, GetMailParams, ListContactsParams, ListMailsParams,
+    MailCommand, ResolveNameParams, SearchContactsParams, SearchMailsParams, ThreadParams,
 };
 use outlook::OutlookBridge;
 use rmcp::{
@@ -139,6 +140,63 @@ impl OutlookMcp {
     ) -> CallToolResult {
         self.call(MailCommand::GetMail(params)).await
     }
+
+    #[tool(
+        description = "List contacts from every contact folder in every store, sorted by name. Bounded (default 50, max 200; scan_truncated reports hitting the scan budget). entry_id is a short session handle; call outlook_get_contact."
+    )]
+    async fn outlook_list_contacts(
+        &self,
+        Parameters(params): Parameters<ListContactsParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::ListContacts(params)).await
+    }
+
+    #[tool(
+        description = "Search contact folders and, by default, the Exchange Global Address List. All query words must match name, email, company or job title. Bounded scans; scan_truncated reports a partial search."
+    )]
+    async fn outlook_search_contacts(
+        &self,
+        Parameters(params): Parameters<SearchContactsParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::SearchContacts(params)).await
+    }
+
+    #[tool(
+        description = "Read one contact by handle from list/search (or raw EntryID). Notes are capped at 4000 characters (notes_truncated)."
+    )]
+    async fn outlook_get_contact(
+        &self,
+        Parameters(params): Parameters<GetContactParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::GetContact(params)).await
+    }
+
+    #[tool(
+        description = "Resolve a name or address against the address book, like Ctrl+K in Outlook. Unique matches resolve; ambiguous ones return resolved=false. No UI is shown."
+    )]
+    async fn outlook_resolve_name(
+        &self,
+        Parameters(params): Parameters<ResolveNameParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::ResolveName(params)).await
+    }
+
+    #[tool(description = "List the profile's color categories (name and Outlook color index).")]
+    async fn outlook_list_categories(&self) -> CallToolResult {
+        self.call(MailCommand::ListCategories).await
+    }
+
+    #[tool(description = "List mail rules on the default store (index, name, enabled). Read-only.")]
+    async fn outlook_list_rules(&self) -> CallToolResult {
+        self.call(MailCommand::ListRules).await
+    }
+
+    #[tool(
+        description = "Read whether Out-of-Office is on. Read-only; status is unknown when the MAPI property is unreadable."
+    )]
+    async fn outlook_get_out_of_office(&self) -> CallToolResult {
+        self.call(MailCommand::GetOutOfOffice).await
+    }
 }
 
 #[tool_handler(
@@ -162,7 +220,7 @@ mod tests {
     fn registered_tools_are_read_only() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 14);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -171,6 +229,13 @@ mod tests {
             "outlook_search_mails",
             "outlook_get_mail",
             "outlook_get_thread",
+            "outlook_list_contacts",
+            "outlook_search_contacts",
+            "outlook_get_contact",
+            "outlook_resolve_name",
+            "outlook_list_categories",
+            "outlook_list_rules",
+            "outlook_get_out_of_office",
         ] {
             assert!(names.contains(&expected));
         }

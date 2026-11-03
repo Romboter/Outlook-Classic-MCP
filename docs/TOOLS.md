@@ -1,6 +1,6 @@
 # Rust MCP tool reference
 
-**As of PR #18 (draft):** One diagnostic tool and six **experimental, read-only** Outlook Classic tools are registered in `rust/src/lib.rs`. This inventory is grounded in `rust/src/contracts.rs`; it is not a live Outlook verification.
+**As of the issue #9 batch 1 branch (draft):** One diagnostic tool and thirteen **experimental, read-only** Outlook Classic tools (six mail/folder/thread plus seven contacts/categories/rules/out-of-office) are registered in `rust/src/lib.rs`. This inventory is grounded in `rust/src/contracts.rs`; it is not a live Outlook verification.
 
 | Tool | Main inputs | Defaults / limits | Output or caveat |
 | --- | --- | --- | --- |
@@ -10,6 +10,13 @@
 | `outlook_list_mails` | `folder?`, `limit?`, `offset?`, `unread_only?`, `from_address?`, `backend?` | limit 10 / max 30; offset 0..1000 | Metadata-only, includes actual backend; `since` and `until` are **not implemented** and return errors |
 | `outlook_search_mails` | `query`, `folder?`, `scope?`, `limit?`, `backend?`, `search_subfolders?` | query length 1..160; limit 10 / max 30; scope `subject_body`; backend `auto` | Backend: `auto`, `table`, `legacy`, `indexed`; only indexed accepts `search_subfolders` |
 | `outlook_get_mail` | `entry_id`, `store_id?`, `include_body?`, `include_html?`, `max_body_chars?` | body on; 4,000 chars default / 12,000 max | Selected plain-text message; HTML bodies disabled |
+| `outlook_list_contacts` | `limit?`, `offset?` | limit 50 / max 200 (matches Python); offset 0..5000 | Contact folders in every store, default store first; 15 s budget and 5,000-item scan cap, `scan_truncated` reports a partial scan. `entry_id` is a short handle |
+| `outlook_search_contacts` | `query`, `limit?`, `include_directory?` | query 1..160; limit 25 / max 100 (matches Python); directory on | All words must match name/email/company/title; then the Exchange GAL by display name (38 s overall ceiling); `scan_truncated` when a budget was hit |
+| `outlook_get_contact` | `entry_id`, `store_id?` | notes capped at 4,000 chars | Handle from list/search or raw EntryID; adds `notes_truncated` (Python returns full notes) |
+| `outlook_resolve_name` | `name` | 1..160 chars | Ctrl+K-style resolve; no UI; ambiguous returns `resolved:false` |
+| `outlook_list_categories` | none | — | Profile color categories (name, color index) |
+| `outlook_list_rules` | none | — | Default-store rules (index, name, enabled); read-only |
+| `outlook_get_out_of_office` | none | — | `out_of_office`/`status` on, off, or unknown when the MAPI property is unreadable |
 | `outlook_get_thread` | `entry_id`, `store_id?`, `max_messages?`, `include_bodies?`, `trim_quoted?`, `per_message_chars?`, `total_body_chars?` | 10 / max 30 messages; per-body 1,500 / max 6,000; total 8,000 / max 24,000 | Exact ConversationID; only recognized quote tails trimmed, omissions flagged |
 
 All mail list/search/thread messages should return compact in-memory `entry_id` handles such as `m1` rather than raw EntryIDs/StoreIDs. Handles expire on restart and may be evicted; repeat search/list when `outlook_get_mail` says a reference is unknown. Raw IDs can still be supplied for compatibility but **do not share them in issues**.

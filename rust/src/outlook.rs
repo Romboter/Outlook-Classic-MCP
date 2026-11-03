@@ -6,6 +6,9 @@ use crate::contracts::{MailCommand, validate_command};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 #[cfg(windows)]
+#[path = "outlook/directory.rs"]
+mod directory;
+#[cfg(windows)]
 #[path = "outlook/indexed.rs"]
 mod indexed;
 #[cfg(windows)]

@@ -2,6 +2,8 @@
 
 **Baseline:** Python server in this fork at `src/outlook_mcp/tools/` and `src/outlook_mcp/client/`, version 0.3.2 at the start of the rewrite. This inventory enumerates all **31** existing `outlook_*` tools; it is a **migration checklist**, not a statement of Rust support.
 
+**Batch 1 (issue #9, draft):** `outlook_list_contacts`, `outlook_search_contacts`, `outlook_get_contact`, `outlook_resolve_name`, `outlook_list_categories`, `outlook_list_rules` and `outlook_get_out_of_office` are implemented experimentally in Rust (12 of 31 Python names now present). Deliberate deviations: contact limits match Python (list 50/200, search 25/100), scans are time- and item-bounded with `scan_truncated`, contact notes are capped, and contact `entry_id` values are short session handles. Owner workstation run on 2026-11-02 of the tools against live Outlook Classic returned the expected key shapes (counts and timings only, no mailbox content recorded); this is not a full parity test.
+
 **Status (2026-11-02, draft PR #22):** five names from the existing Python inventory are implemented experimentally in Rust: `outlook_whoami`, `outlook_list_folders`, `outlook_list_mails`, `outlook_search_mails`, and `outlook_get_mail`. Rust also registers `outlook_get_thread` and `outlook_rust_status` (outside the original 31). The owner has reported selected **interactive Outlook Classic** read checks; the Python client function key-shapes were validated for **15 read-only tools via OutlookBridge STA**, but the FastMCP tool wrappers were **not** exercised. These observations do not prove complete parity or release readiness, and no Rust changes are merged to `main`.
 
 | Existing tool | Category | Operation | Python source | Rust milestone |

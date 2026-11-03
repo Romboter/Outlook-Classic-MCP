@@ -417,6 +417,32 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
     }))
 }
 
+/// `OlFlagStatus.olFlagMarked`.
+fn is_flagged(item: &IDispatch) -> bool {
+    win::int_property(item, "FlagStatus").ok() == Some(2)
+}
+
+/// 1-indexed attachment list, the index `outlook_save_attachments` takes. Bounded like it.
+fn attachment_list(item: &IDispatch) -> Vec<Value> {
+    let Ok(collection) = win::object_property(item, "Attachments") else {
+        return Vec::new();
+    };
+    let count = win::int_property(&collection, "Count")
+        .unwrap_or(0)
+        .clamp(0, 100);
+    (1..=count)
+        .filter_map(|i| {
+            let attachment =
+                win::method_object(&collection, "Item", vec![VARIANT::from(i)]).ok()?;
+            Some(json!({
+                "index": i,
+                "filename": optional_text(&attachment, "FileName"),
+                "size_bytes": win::int_property(&attachment, "Size").ok(),
+            }))
+        })
+        .collect()
+}
+
 fn get_mail(namespace: &IDispatch, params: GetMailParams) -> Result<Value> {
     let mut args = vec![VARIANT::from(params.entry_id.as_str())];
     if let Some(ref store) = params.store_id {
@@ -436,6 +462,22 @@ fn get_mail(namespace: &IDispatch, params: GetMailParams) -> Result<Value> {
     let object = data.as_object_mut().context("invalid mail result")?;
     object.insert("to".into(), json!(optional_text(&item, "To")));
     object.insert("cc".into(), json!(optional_text(&item, "CC")));
+    object.insert("bcc".into(), json!(optional_text(&item, "BCC")));
+    object.insert("sent".into(), json!(schedule::date_iso(&item, "SentOn")));
+    object.insert("flagged".into(), json!(is_flagged(&item)));
+    object.insert(
+        "importance".into(),
+        json!(win::int_property(&item, "Importance").ok()),
+    );
+    object.insert(
+        "categories".into(),
+        json!(optional_text(&item, "Categories")),
+    );
+    object.insert(
+        "conversation_id".into(),
+        json!(optional_text(&item, "ConversationID")),
+    );
+    object.insert("attachments".into(), json!(attachment_list(&item)));
     if params.include_body.unwrap_or(true) {
         let body = optional_text(&item, "Body");
         let total_chars = body.chars().count();

@@ -341,6 +341,7 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
             "folder": folder_name,
             "count": page.items.len(), "limit": limit, "offset": offset,
             "has_more": page.has_more, "items": page.items,
+            "next_offset": page.has_more.then_some(offset + page.items.len()),
             "backend": "folder_table", "scanned": page.scanned,
             "scan_truncated": page.scan_truncated,
             "instant_search_enabled": instant_search_enabled,
@@ -371,6 +372,7 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
             Ok(json!({
                 "folder": folder_name, "count": rows.len(), "limit": limit,
                 "offset": offset, "has_more": has_more, "items": rows,
+                "next_offset": has_more.then_some(offset + rows.len()),
                 "backend": if backend == "legacy" { "items_legacy" } else { "items_legacy_fallback" },
                 "table_fallback": backend == "auto",
                 "instant_search_enabled": instant_search_enabled,

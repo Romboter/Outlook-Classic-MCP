@@ -18,7 +18,7 @@ Severity: **blocks** = blocks real daily use; **nice** = nice to have; **deliber
 | 6 | G04 | List and search rows omitted `to`, `flagged`, `has_attachments`, `importance`, `preview`. **Fixed** on table and legacy paths (live read-only check: table and legacy agree 30 of 30 on `to`, `flagged`, `has_attachments`, `importance`; previews agree on the first 60 characters for 27 of 30). Rows are larger, so each result costs more tokens. | done |
 | 7 | G11 | **FIXED (live read-only check passed).** Was: folder specs: no `junk`/`spam`/`trash` aliases and no store-name prefix, so archive, PST or shared stores cannot be addressed. Default mailbox only. | M |
 | 8 | G10 | **FIXED (uncommitted; live read-only check 5 of 5 mails).** `get_mail` takes `body_offset`, result gives `body_next_offset`. Was: no way to read past the 12,000-char body ceiling (no offset or continuation). Long threads and newsletters are cut with no recourse. | S |
-| 9 | G22 | `outlook_list_folders` omits `unread_count` and `default_item_type`, and caps at 100 rows and depth 4. | S |
+| 9 | G22 | **PARTLY FIXED (uncommitted):** rows now carry `unread_count` and `default_item_type` (live read-only check ok); the 100-row cap, depth cap 4 and single-store `root` remain. Was: `outlook_list_folders` omits `unread_count` and `default_item_type`, and caps at 100 rows and depth 4. | S |
 | 10 | G25 | `outlook_whoami` returns only `current_user`: no accounts, `local_time`, `timezone`, `utc_offset`. | S |
 
 Calendar and task reads are close to Python (G26 to G33 are mostly write-side or beyond-Python). Contacts, categories, rules and out-of-office reads match Python field for field.

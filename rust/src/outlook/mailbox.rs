@@ -277,7 +277,9 @@ fn list_folders(namespace: &IDispatch, params: FolderParams) -> Result<Value> {
             .ok()
             .and_then(|items| win::int_property(&items, "Count").ok());
         rows.push(json!({"name": optional_text(folder, "Name"),
-            "path": name, "item_count": count}));
+            "path": name, "item_count": count,
+            "unread_count": win::int_property(folder, "UnReadItemCount").unwrap_or(0),
+            "default_item_type": win::int_property(folder, "DefaultItemType").unwrap_or(-1)}));
         if depth >= max_depth {
             return Ok(());
         }

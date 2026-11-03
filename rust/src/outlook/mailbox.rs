@@ -3,8 +3,8 @@
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
 use super::{
-    MailCommand, cancel, compose, delete, directory, indexed, modify, respond, rule, schedule,
-    schedule_write, table, win,
+    MailCommand, cancel, compose, delete, directory, indexed, meeting, modify, respond, rule,
+    schedule, schedule_write, table, win,
 };
 use crate::action::ActionKind;
 use crate::contracts::{
@@ -437,6 +437,44 @@ impl win::Session {
                 (params.entry_id, params.store_id) =
                     self.resolve_ids(&params.entry_id, &params.store_id)?;
                 schedule_write::update_event(&self.namespace, params)
+            }
+            MailCommand::ActionPrepare(target) if target.kind == ActionKind::InviteMeeting => {
+                meeting::prepare_invite(&self._application, &self.namespace, &target)
+            }
+            MailCommand::ActionExecute { target, preview }
+                if target.kind == ActionKind::InviteMeeting =>
+            {
+                meeting::execute_invite(&self._application, &target, &preview)
+            }
+            MailCommand::ActionLocate { action_id, target }
+                if target
+                    .as_ref()
+                    .is_some_and(|t| t.kind == ActionKind::InviteMeeting) =>
+            {
+                meeting::locate_invite(&self.namespace, &action_id)
+            }
+            MailCommand::ActionPrepare(mut target) if target.kind == ActionKind::UpdateMeeting => {
+                (target.entry_id, target.store_id) =
+                    self.resolve_ids(&target.entry_id, &target.store_id)?;
+                meeting::prepare_update(&self.namespace, &target)
+            }
+            MailCommand::ActionExecute {
+                mut target,
+                preview,
+            } if target.kind == ActionKind::UpdateMeeting => {
+                (target.entry_id, target.store_id) =
+                    self.resolve_ids(&target.entry_id, &target.store_id)?;
+                meeting::execute_update(&self.namespace, &target, &preview)
+            }
+            MailCommand::ActionLocate { mut target, .. }
+                if target
+                    .as_ref()
+                    .is_some_and(|t| t.kind == ActionKind::UpdateMeeting) =>
+            {
+                if let Some(t) = target.as_mut() {
+                    (t.entry_id, t.store_id) = self.resolve_ids(&t.entry_id, &t.store_id)?;
+                }
+                meeting::locate_update(&self.namespace, target.as_ref())
             }
             MailCommand::ActionPrepare(mut target) if target.kind == ActionKind::CancelMeeting => {
                 (target.entry_id, target.store_id) =

@@ -30,6 +30,8 @@ pub struct ActionSettings {
     pub rule_hard_max_per_hour: usize,
     pub response_per_hour: usize,
     pub response_hard_max_per_hour: usize,
+    pub meeting_per_hour: usize,
+    pub meeting_hard_max_per_hour: usize,
     pub strict: bool,
 }
 
@@ -42,6 +44,8 @@ impl Default for ActionSettings {
             rule_hard_max_per_hour: 20,
             response_per_hour: 10,
             response_hard_max_per_hour: 50,
+            meeting_per_hour: 10,
+            meeting_hard_max_per_hour: 50,
             strict: false,
         }
     }
@@ -81,6 +85,11 @@ impl ActionSettings {
                 "OUTLOOK_MCP_RESPONSE_HARD_MAX_PER_HOUR",
                 defaults.response_hard_max_per_hour,
             )?,
+            meeting_per_hour: number("OUTLOOK_MCP_MEETING_PER_HOUR", defaults.meeting_per_hour)?,
+            meeting_hard_max_per_hour: number(
+                "OUTLOOK_MCP_MEETING_HARD_MAX_PER_HOUR",
+                defaults.meeting_hard_max_per_hour,
+            )?,
             strict: matches!(
                 get("OUTLOOK_MCP_ACTION_STRICT")
                     .map(|v| v.trim().to_ascii_lowercase())
@@ -91,6 +100,7 @@ impl ActionSettings {
         if settings.delete_hard_max_per_hour < settings.delete_per_hour
             || settings.rule_hard_max_per_hour < settings.rule_per_hour
             || settings.response_hard_max_per_hour < settings.response_per_hour
+            || settings.meeting_hard_max_per_hour < settings.meeting_per_hour
         {
             return Err("hard action ceilings must not be below the usual limits".into());
         }
@@ -102,6 +112,7 @@ impl ActionSettings {
         match kind.class() {
             "rules" => (self.rule_per_hour, self.rule_hard_max_per_hour),
             "responses" => (self.response_per_hour, self.response_hard_max_per_hour),
+            "meetings" => (self.meeting_per_hour, self.meeting_hard_max_per_hour),
             _ => (self.delete_per_hour, self.delete_hard_max_per_hour),
         }
     }
@@ -114,6 +125,8 @@ pub enum ActionKind {
     ToggleRule,
     RespondEvent,
     CancelMeeting,
+    InviteMeeting,
+    UpdateMeeting,
 }
 
 impl ActionKind {
@@ -124,6 +137,8 @@ impl ActionKind {
             ActionKind::ToggleRule => "toggle_rule",
             ActionKind::RespondEvent => "respond_event",
             ActionKind::CancelMeeting => "cancel_meeting",
+            ActionKind::InviteMeeting => "invite_meeting",
+            ActionKind::UpdateMeeting => "update_meeting",
         }
     }
 
@@ -136,6 +151,7 @@ impl ActionKind {
             }
             ActionKind::ToggleRule => "rules",
             ActionKind::RespondEvent => "responses",
+            ActionKind::InviteMeeting | ActionKind::UpdateMeeting => "meetings",
         }
     }
 
@@ -143,6 +159,7 @@ impl ActionKind {
         match self.class() {
             "rules" => "rule changes",
             "responses" => "meeting responses",
+            "meetings" => "meeting invitations and updates",
             _ => "deletes",
         }
     }
@@ -159,6 +176,8 @@ pub struct ActionTarget {
     /// For meeting responses: `accept`, `tentative` or `decline` (`enabled` then
     /// says whether a reply is emailed to the organizer).
     pub response: Option<String>,
+    /// For meeting invitations and updates: the proposed meeting, as JSON.
+    pub payload: Option<serde_json::Value>,
 }
 
 impl ActionTarget {
@@ -169,7 +188,10 @@ impl ActionTarget {
             ActionKind::DeleteMail | ActionKind::DeleteEvent => Capability::Delete,
             ActionKind::ToggleRule => Capability::Rules,
             ActionKind::RespondEvent if self.enabled == Some(false) => Capability::Events,
-            ActionKind::RespondEvent | ActionKind::CancelMeeting => Capability::Send,
+            ActionKind::RespondEvent
+            | ActionKind::CancelMeeting
+            | ActionKind::InviteMeeting
+            | ActionKind::UpdateMeeting => Capability::Send,
         }
     }
 }
@@ -601,6 +623,7 @@ mod tests {
             store_id: None,
             enabled: None,
             response: None,
+            payload: None,
         }
     }
 
@@ -733,6 +756,7 @@ mod tests {
             store_id: None,
             enabled: Some(on),
             response: None,
+            payload: None,
         }
     }
 
@@ -779,6 +803,7 @@ mod tests {
             store_id: None,
             enabled: Some(true),
             response: Some("accept".into()),
+            payload: None,
         };
         // Deletes and rule changes do not use up meeting responses.
         assert_eq!(status(&e.run(target("m9")).await), "done");
@@ -799,6 +824,7 @@ mod tests {
                 store_id: None,
                 enabled,
                 response: None,
+                payload: None,
             }
             .capability()
         };
@@ -806,6 +832,8 @@ mod tests {
         assert_eq!(of(ActionKind::DeleteEvent, None), Capability::Delete);
         assert_eq!(of(ActionKind::ToggleRule, Some(true)), Capability::Rules);
         assert_eq!(of(ActionKind::CancelMeeting, None), Capability::Send);
+        assert_eq!(of(ActionKind::InviteMeeting, None), Capability::Send);
+        assert_eq!(of(ActionKind::UpdateMeeting, None), Capability::Send);
         assert_eq!(of(ActionKind::RespondEvent, Some(true)), Capability::Send);
         assert_eq!(of(ActionKind::RespondEvent, None), Capability::Send);
         assert_eq!(

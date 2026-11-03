@@ -62,7 +62,7 @@ fn check_allowed(namespace: &IDispatch, item: &IDispatch) -> Result<()> {
 
 /// Readable address: Exchange recipients carry an internal `/o=...` address,
 /// so ask the address entry for the SMTP one and show nothing rather than the DN.
-fn smtp_address(recipient: &IDispatch) -> String {
+pub(super) fn smtp_address(recipient: &IDispatch) -> String {
     let plain = optional_text(recipient, "Address");
     if !plain.starts_with('/') {
         return plain;
@@ -74,7 +74,7 @@ fn smtp_address(recipient: &IDispatch) -> String {
 }
 
 /// `(count, "Name <address>" for the first MAX_LISTED)`.
-fn attendees(item: &IDispatch) -> (i32, Vec<String>) {
+pub(super) fn attendees(item: &IDispatch) -> (i32, Vec<String>) {
     let Ok(recipients) = win::object_property(item, "Recipients") else {
         return (0, vec![]);
     };

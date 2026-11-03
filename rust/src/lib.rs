@@ -25,8 +25,8 @@ use contracts::{
     ResolveNameParams, RespondEventParams, SearchContactsParams, SearchMailsParams,
     SendDraftParams, SendMailParams, SetCategoryParams, ThreadParams, ToggleRuleParams,
     UpdateEventParams, checked_send_id, prepare_cancel_meeting, prepare_delete,
-    prepare_forward_mail, prepare_reply_mail, prepare_respond_event, prepare_send_mail,
-    prepare_toggle_rule,
+    prepare_forward_mail, prepare_invite_meeting, prepare_reply_mail, prepare_respond_event,
+    prepare_send_mail, prepare_toggle_rule, prepare_update_meeting,
 };
 use outlook::OutlookBridge;
 use policy::{Capability, Policy};
@@ -746,7 +746,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Create a calendar event with optional recurrence, on your own calendar only. Requires events permission (server mode full). Inviting attendees (which sends mail) and online meetings are not supported yet. Times are local ISO-8601 or carry a UTC offset.",
+        description = "Create a calendar event. Without attendees it is on your own calendar only (events permission, server mode full). With `attendees` (plain email addresses) it is a meeting: invitations are emailed only after the user approves a prompt listing every attendee (outside-organization ones marked), and it needs send permission; recurring meetings and online meetings are not supported yet. Nothing is created if the prompt is declined or the client cannot show it. Times are local ISO-8601 or carry a UTC offset.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -756,13 +756,40 @@ impl OutlookMcp {
     )]
     async fn outlook_create_event(
         &self,
+        peer: Peer<RoleServer>,
         Parameters(params): Parameters<CreateEventParams>,
     ) -> CallToolResult {
+        if params.attendees.as_ref().is_some_and(|a| !a.is_empty()) {
+            return match prepare_invite_meeting(&params) {
+                Ok(target) => self.confirmed(peer, target).await,
+                Err(error) => text_error(error),
+            };
+        }
         self.call(MailCommand::CreateEvent(params)).await
     }
 
     #[tool(
-        description = "Change an event's subject, start, end, location or body. Requires events permission (server mode full). Refused for meetings with attendees, because saving would notify them. Reads the event back.",
+        description = "Change the subject, start, end, location or description of a meeting you organized and email the update to every attendee, only after the user approves a prompt showing each change and every attendee (outside-organization attendees are marked). Refused for events without attendees (use outlook_update_event), meetings you did not organize, cancelled and recurring meetings. Cannot add or remove attendees. Requires send permission (server mode full). Check `done` in the result; on unknown_outcome call outlook_check_action and never retry.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn outlook_update_meeting(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<UpdateEventParams>,
+    ) -> CallToolResult {
+        match prepare_update_meeting(&params) {
+            Ok(target) => self.confirmed(peer, target).await,
+            Err(error) => text_error(error),
+        }
+    }
+
+    #[tool(
+        description = "Change an event's subject, start, end, location or body. Requires events permission (server mode full). Refused for meetings with attendees (use outlook_update_meeting). Reads the event back.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -993,7 +1020,7 @@ mod tests {
     fn registered_tools_exclude_not_yet_implemented_writes() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 36);
+        assert_eq!(tools.len(), 37);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -1031,6 +1058,7 @@ mod tests {
             "outlook_toggle_rule",
             "outlook_respond_event",
             "outlook_cancel_meeting",
+            "outlook_update_meeting",
         ] {
             assert!(names.contains(&expected));
         }

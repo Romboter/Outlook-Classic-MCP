@@ -360,8 +360,184 @@ pub fn checked_send_id(send_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CreateTaskParams {
+    pub subject: String,
+    /// Due date, local ISO-8601 (2026-05-01) or with an offset.
+    pub due_date: Option<String>,
+    pub body: Option<String>,
+    /// low, normal (default) or high.
+    pub importance: Option<String>,
+    /// Reminder time, local ISO-8601 or with an offset.
+    pub reminder: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CompleteTaskParams {
+    /// Short handle from list_tasks, or a raw Outlook EntryID.
+    pub entry_id: String,
+    pub store_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct RecurrenceParams {
+    /// daily, weekly, monthly or yearly.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Every N units (default 1).
+    pub interval: Option<u32>,
+    /// End after N occurrences (alternative to end_date).
+    pub occurrences: Option<u32>,
+    /// ISO-8601 date the series ends (alternative to occurrences).
+    pub end_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CreateEventParams {
+    pub subject: String,
+    /// Local ISO-8601 start, or with an offset (converted to local).
+    pub start: String,
+    pub end: String,
+    pub location: Option<String>,
+    pub body: Option<String>,
+    /// Inviting attendees is not supported yet; must be empty or omitted.
+    pub attendees: Option<Vec<String>>,
+    /// Online meetings are not supported yet; must be false or omitted.
+    pub is_online_meeting: Option<bool>,
+    /// Minutes before start (default 15).
+    pub reminder_minutes: Option<u32>,
+    pub recurrence: Option<RecurrenceParams>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct UpdateEventParams {
+    /// Short handle from list_events, or a raw Outlook EntryID.
+    pub entry_id: String,
+    pub store_id: Option<String>,
+    pub subject: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub location: Option<String>,
+    pub body: Option<String>,
+}
+
+fn checked_free_text(value: &str, what: &str, max: usize) -> Result<(), String> {
+    if value.chars().count() > max {
+        return Err(format!("{what} must be at most {max} characters"));
+    }
+    Ok(())
+}
+
+fn checked_title(value: &str, what: &str) -> Result<(), String> {
+    if value.trim().is_empty() || value.chars().count() > 255 || value.chars().any(char::is_control)
+    {
+        return Err(format!("{what} must be 1..255 characters on one line"));
+    }
+    Ok(())
+}
+
+fn parsed(text: &str, what: &str) -> Result<LocalTime, String> {
+    let (time, offset) = LocalTime::parse_with_offset(text).map_err(|e| format!("{what}: {e}"))?;
+    // Offsets are converted to local time by the Outlook layer; for ordering
+    // here compare on UTC-equivalent minutes.
+    Ok(time.shift_minutes(-i64::from(offset.unwrap_or(0))))
+}
+
+pub fn validate_create_task(x: &CreateTaskParams) -> Result<(), String> {
+    checked_title(&x.subject, "subject")?;
+    checked_free_text(x.body.as_deref().unwrap_or(""), "body", 100_000)?;
+    if let Some(level) = &x.importance
+        && !matches!(
+            level.to_ascii_lowercase().as_str(),
+            "low" | "normal" | "high"
+        )
+    {
+        return Err("importance must be low, normal or high".into());
+    }
+    for (value, what) in [(&x.due_date, "due_date"), (&x.reminder, "reminder")] {
+        if let Some(text) = value {
+            LocalTime::parse_with_offset(text).map_err(|e| format!("{what}: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_create_event(x: &CreateEventParams) -> Result<(), String> {
+    checked_title(&x.subject, "subject")?;
+    if x.attendees.as_ref().is_some_and(|a| !a.is_empty()) {
+        return Err(
+            "inviting attendees sends mail and is not supported yet; create the event without attendees"
+                .into(),
+        );
+    }
+    if x.is_online_meeting == Some(true) {
+        return Err("online meetings are not supported yet".into());
+    }
+    let (start, end) = (parsed(&x.start, "start")?, parsed(&x.end, "end")?);
+    if end.minutes() <= start.minutes() {
+        return Err("end must be after start".into());
+    }
+    checked_free_text(x.location.as_deref().unwrap_or(""), "location", 255)?;
+    checked_free_text(x.body.as_deref().unwrap_or(""), "body", 100_000)?;
+    if x.reminder_minutes.is_some_and(|m| m > 525_600) {
+        return Err("reminder_minutes must be at most 525600".into());
+    }
+    if let Some(r) = &x.recurrence {
+        if !matches!(r.kind.as_str(), "daily" | "weekly" | "monthly" | "yearly") {
+            return Err("recurrence type must be daily, weekly, monthly or yearly".into());
+        }
+        if r.interval.is_some_and(|i| !(1..=999).contains(&i)) {
+            return Err("recurrence interval must be 1..999".into());
+        }
+        if r.occurrences.is_some() && r.end_date.is_some() {
+            return Err("give recurrence occurrences or end_date, not both".into());
+        }
+        if r.occurrences.is_some_and(|o| !(1..=999).contains(&o)) {
+            return Err("recurrence occurrences must be 1..999".into());
+        }
+        if let Some(date) = &r.end_date
+            && parsed(date, "recurrence end_date")?.minutes() <= start.minutes()
+        {
+            return Err("recurrence end_date must be after the start".into());
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_update_event(x: &UpdateEventParams) -> Result<(), String> {
+    checked_id(&x.entry_id, x.store_id.as_deref())?;
+    if x.subject.is_none()
+        && x.start.is_none()
+        && x.end.is_none()
+        && x.location.is_none()
+        && x.body.is_none()
+    {
+        return Err("nothing to change".into());
+    }
+    if let Some(subject) = &x.subject {
+        checked_title(subject, "subject")?;
+    }
+    for (value, what) in [(&x.start, "start"), (&x.end, "end")] {
+        if let Some(text) = value {
+            parsed(text, what)?;
+        }
+    }
+    if let (Some(start), Some(end)) = (&x.start, &x.end)
+        && parsed(end, "end")?.minutes() <= parsed(start, "start")?.minutes()
+    {
+        return Err("end must be after start".into());
+    }
+    checked_free_text(x.location.as_deref().unwrap_or(""), "location", 255)?;
+    checked_free_text(x.body.as_deref().unwrap_or(""), "body", 100_000)?;
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub enum MailCommand {
+    CreateTask(CreateTaskParams),
+    CompleteTask(CompleteTaskParams),
+    CreateEvent(CreateEventParams),
+    UpdateEvent(UpdateEventParams),
     /// Send pipeline steps on the Outlook worker; the pipeline itself is in `crate::send`.
     ComposePrepare(PrepareRequest),
     ComposeInspect(DraftRef),
@@ -444,6 +620,8 @@ impl MailCommand {
             MailCommand::ComposeInspect(_) | MailCommand::ComposeLocate(_) => Capability::Read,
             MailCommand::ComposePrepare(_) => Capability::Draft,
             MailCommand::ComposeSend { .. } => Capability::Send,
+            MailCommand::CreateEvent(_) | MailCommand::UpdateEvent(_) => Capability::Events,
+            MailCommand::CreateTask(_) | MailCommand::CompleteTask(_) => Capability::Modify,
             MailCommand::MarkMail(_)
             | MailCommand::SetCategory(_)
             | MailCommand::CreateFolder(_)
@@ -488,6 +666,10 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         | MailCommand::ComposeInspect(_)
         | MailCommand::ComposeSend { .. } => Ok(()),
         MailCommand::ComposeLocate(id) => checked_send_id(id),
+        MailCommand::CreateTask(x) => validate_create_task(x),
+        MailCommand::CompleteTask(x) => checked_id(&x.entry_id, x.store_id.as_deref()),
+        MailCommand::CreateEvent(x) => validate_create_event(x),
+        MailCommand::UpdateEvent(x) => validate_update_event(x),
         MailCommand::MarkMail(x) => {
             checked_id(&x.entry_id, x.store_id.as_deref())?;
             if x.read.is_none() && x.flagged.is_none() {
@@ -770,6 +952,141 @@ mod tests {
         for blocked in ["Deleted Items", " deleted ", "DELETED ITEMS"] {
             assert!(validate_command(&moving(blocked)).is_err(), "{blocked}");
         }
+    }
+
+    #[test]
+    fn task_and_event_writes_use_modify_and_events_capabilities() {
+        let task = CreateTaskParams {
+            subject: "Pay invoice".into(),
+            due_date: Some("2026-05-01".into()),
+            body: None,
+            importance: Some("High".into()),
+            reminder: None,
+        };
+        assert!(validate_create_task(&task).is_ok());
+        assert_eq!(
+            MailCommand::CreateTask(task).capability(),
+            Capability::Modify
+        );
+        assert_eq!(
+            MailCommand::CompleteTask(CompleteTaskParams {
+                entry_id: "m1".into(),
+                store_id: None
+            })
+            .capability(),
+            Capability::Modify
+        );
+        let event = || CreateEventParams {
+            subject: "Review".into(),
+            start: "2026-05-01T09:00".into(),
+            end: "2026-05-01T10:00".into(),
+            location: None,
+            body: None,
+            attendees: None,
+            is_online_meeting: None,
+            reminder_minutes: None,
+            recurrence: None,
+        };
+        assert!(validate_create_event(&event()).is_ok());
+        assert_eq!(
+            MailCommand::CreateEvent(event()).capability(),
+            Capability::Events
+        );
+        assert_eq!(
+            MailCommand::UpdateEvent(UpdateEventParams {
+                entry_id: "m1".into(),
+                store_id: None,
+                subject: Some("x".into()),
+                start: None,
+                end: None,
+                location: None,
+                body: None
+            })
+            .capability(),
+            Capability::Events
+        );
+    }
+
+    #[test]
+    fn event_inputs_reject_notifying_and_malformed_requests() {
+        let base = || CreateEventParams {
+            subject: "Review".into(),
+            start: "2026-05-01T09:00".into(),
+            end: "2026-05-01T10:00".into(),
+            location: None,
+            body: None,
+            attendees: None,
+            is_online_meeting: None,
+            reminder_minutes: None,
+            recurrence: None,
+        };
+        let mut x = base();
+        x.attendees = Some(vec!["a@b.example".into()]);
+        assert!(
+            validate_create_event(&x).is_err(),
+            "attendees would send invitations"
+        );
+        let mut x = base();
+        x.attendees = Some(vec![]);
+        assert!(validate_create_event(&x).is_ok());
+        let mut x = base();
+        x.is_online_meeting = Some(true);
+        assert!(validate_create_event(&x).is_err());
+        let mut x = base();
+        x.end = "2026-05-01T09:00".into();
+        assert!(validate_create_event(&x).is_err());
+        let mut x = base();
+        x.start = "2026-05-01T09:00+02:00".into();
+        x.end = "2026-05-01T07:30Z".into();
+        assert!(
+            validate_create_event(&x).is_ok(),
+            "offsets compare in UTC: 07:00Z to 07:30Z"
+        );
+        let mut x = base();
+        x.start = "not a date".into();
+        assert!(validate_create_event(&x).is_err());
+        let recurrence = |kind: &str, occ: Option<u32>, end: Option<&str>| RecurrenceParams {
+            kind: kind.into(),
+            interval: None,
+            occurrences: occ,
+            end_date: end.map(Into::into),
+        };
+        let mut x = base();
+        x.recurrence = Some(recurrence("weekly", Some(4), None));
+        assert!(validate_create_event(&x).is_ok());
+        for bad in [
+            recurrence("hourly", None, None),
+            recurrence("daily", Some(0), None),
+            recurrence("daily", Some(2), Some("2026-06-01")),
+            recurrence("daily", None, Some("2026-04-01")),
+        ] {
+            let mut x = base();
+            x.recurrence = Some(bad);
+            assert!(validate_create_event(&x).is_err());
+        }
+        let update = |subject: Option<&str>| UpdateEventParams {
+            entry_id: "m1".into(),
+            store_id: None,
+            subject: subject.map(Into::into),
+            start: None,
+            end: None,
+            location: None,
+            body: None,
+        };
+        assert!(
+            validate_update_event(&update(None)).is_err(),
+            "nothing to change"
+        );
+        assert!(validate_update_event(&update(Some("New title"))).is_ok());
+        let task = |s: &str, imp: Option<&str>| CreateTaskParams {
+            subject: s.into(),
+            due_date: None,
+            body: None,
+            importance: imp.map(Into::into),
+            reminder: None,
+        };
+        assert!(validate_create_task(&task("", None)).is_err());
+        assert!(validate_create_task(&task("ok", Some("urgent"))).is_err());
     }
 
     #[test]

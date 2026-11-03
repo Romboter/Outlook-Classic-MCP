@@ -15,7 +15,10 @@ use windows::Win32::{
         Com::{DISPATCH_METHOD, IDispatch},
         SystemInformation::GetLocalTime,
         Time::{SystemTimeToTzSpecificLocalTime, TzSpecificLocalTimeToSystemTime},
-        Variant::{VAR_CHANGE_FLAGS, VARIANT, VT_R8, VariantChangeType, VariantTimeToSystemTime},
+        Variant::{
+            SystemTimeToVariantTime, VAR_CHANGE_FLAGS, VARIANT, VT_DATE, VT_R8, VariantChangeType,
+            VariantTimeToSystemTime,
+        },
     },
 };
 
@@ -94,7 +97,7 @@ fn offset_suffix(local: &LocalTime) -> String {
 }
 
 /// Bound given as local time or with an offset, resolved to local wall clock.
-fn resolve_bound(text: &str) -> Result<LocalTime> {
+pub(super) fn resolve_bound(text: &str) -> Result<LocalTime> {
     let (time, offset) = LocalTime::parse_with_offset(text).map_err(anyhow::Error::msg)?;
     match offset {
         None => Ok(time),
@@ -102,8 +105,27 @@ fn resolve_bound(text: &str) -> Result<LocalTime> {
     }
 }
 
+/// An Outlook DATE (`VT_DATE`) for a local wall-clock time.
+pub(super) fn date_variant(time: &LocalTime) -> Result<VARIANT> {
+    if !(1900..=4000).contains(&time.year) {
+        bail!("year must be between 1900 and 4000");
+    }
+    let st = to_system_time(time);
+    let mut vtime = 0f64;
+    // SAFETY: `st` and `vtime` are live locals.
+    if unsafe { SystemTimeToVariantTime(&st, &mut vtime) } == 0 {
+        bail!("date is out of range");
+    }
+    let source = VARIANT::from(vtime);
+    let mut date = VARIANT::default();
+    // SAFETY: both VARIANTs are live locals; VT_R8 coerces to VT_DATE.
+    unsafe { VariantChangeType(&mut date, &source, VAR_CHANGE_FLAGS(0), VT_DATE) }
+        .context("date conversion failed")?;
+    Ok(date)
+}
+
 /// A DATE property as local ISO-8601 text, or None when unset or unreadable.
-fn date_iso(object: &IDispatch, name: &str) -> Option<String> {
+pub(super) fn date_iso(object: &IDispatch, name: &str) -> Option<String> {
     let value = win::property(object, name).ok()?;
     let mut converted = VARIANT::default();
     // SAFETY: both VARIANTs are live locals; VT_DATE coerces to its VT_R8 value.

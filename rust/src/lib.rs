@@ -13,11 +13,12 @@ pub mod thread_text;
 pub mod ticket;
 
 use contracts::{
-    CheckSendParams, CreateFolderParams, FolderParams, ForwardMailParams, GetContactParams,
-    GetEventParams, GetMailParams, ListContactsParams, ListEventsParams, ListMailsParams,
-    ListTasksParams, MailCommand, MarkMailParams, MoveMailParams, ReplyMailParams,
-    ResolveNameParams, SearchContactsParams, SearchMailsParams, SendDraftParams, SendMailParams,
-    SetCategoryParams, ThreadParams, checked_send_id, prepare_forward_mail, prepare_reply_mail,
+    CheckSendParams, CompleteTaskParams, CreateEventParams, CreateFolderParams, CreateTaskParams,
+    FolderParams, ForwardMailParams, GetContactParams, GetEventParams, GetMailParams,
+    ListContactsParams, ListEventsParams, ListMailsParams, ListTasksParams, MailCommand,
+    MarkMailParams, MoveMailParams, ReplyMailParams, ResolveNameParams, SearchContactsParams,
+    SearchMailsParams, SendDraftParams, SendMailParams, SetCategoryParams, ThreadParams,
+    UpdateEventParams, checked_send_id, prepare_forward_mail, prepare_reply_mail,
     prepare_send_mail,
 };
 use outlook::OutlookBridge;
@@ -604,6 +605,70 @@ impl OutlookMcp {
         outcome_result(self.engine(peer).check(&params.send_id).await)
     }
 
+    #[tool(
+        description = "Create a task (subject, optional due_date, body, importance, reminder). Requires modify permission (server mode full). Reads the task back and reports the stored values.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_create_task(
+        &self,
+        Parameters(params): Parameters<CreateTaskParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::CreateTask(params)).await
+    }
+
+    #[tool(
+        description = "Mark a task complete by handle from list_tasks. Requires modify permission (server mode full). Reports whether Outlook now shows it complete.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_complete_task(
+        &self,
+        Parameters(params): Parameters<CompleteTaskParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::CompleteTask(params)).await
+    }
+
+    #[tool(
+        description = "Create a calendar event with optional recurrence, on your own calendar only. Requires events permission (server mode full). Inviting attendees (which sends mail) and online meetings are not supported yet. Times are local ISO-8601 or carry a UTC offset.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_create_event(
+        &self,
+        Parameters(params): Parameters<CreateEventParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::CreateEvent(params)).await
+    }
+
+    #[tool(
+        description = "Change an event's subject, start, end, location or body. Requires events permission (server mode full). Refused for meetings with attendees, because saving would notify them. Reads the event back.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_update_event(
+        &self,
+        Parameters(params): Parameters<UpdateEventParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::UpdateEvent(params)).await
+    }
+
     #[tool(description = "List the profile's color categories (name and Outlook color index).")]
     async fn outlook_list_categories(&self) -> CallToolResult {
         self.call(MailCommand::ListCategories).await
@@ -700,7 +765,7 @@ mod tests {
     fn registered_tools_exclude_not_yet_implemented_destructive_writes() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 26);
+        assert_eq!(tools.len(), 30);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -728,12 +793,17 @@ mod tests {
             "outlook_forward_mail",
             "outlook_send_draft",
             "outlook_check_send",
+            "outlook_create_task",
+            "outlook_complete_task",
+            "outlook_create_event",
+            "outlook_update_event",
         ] {
             assert!(names.contains(&expected));
         }
         for forbidden in [
             "outlook_delete_mail",
             "outlook_delete_event",
+            "outlook_respond_event",
             "outlook_toggle_rule",
         ] {
             assert!(!names.contains(&forbidden));

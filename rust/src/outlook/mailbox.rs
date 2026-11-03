@@ -2,7 +2,9 @@
 //!
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
-use super::{MailCommand, compose, directory, indexed, modify, schedule, table, win};
+use super::{
+    MailCommand, compose, directory, indexed, modify, schedule, schedule_write, table, win,
+};
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
 };
@@ -417,6 +419,22 @@ impl win::Session {
             MailCommand::WhoAmI => {
                 let recipient = win::object_property(&self.namespace, "CurrentUser")?;
                 Ok(json!({"current_user": win::string_property(&recipient, "Name")?}))
+            }
+            MailCommand::CreateTask(params) => {
+                schedule_write::create_task(&self._application, &self.namespace, params)
+            }
+            MailCommand::CompleteTask(mut params) => {
+                (params.entry_id, params.store_id) =
+                    self.resolve_ids(&params.entry_id, &params.store_id)?;
+                schedule_write::complete_task(&self.namespace, params)
+            }
+            MailCommand::CreateEvent(params) => {
+                schedule_write::create_event(&self._application, &self.namespace, params)
+            }
+            MailCommand::UpdateEvent(mut params) => {
+                (params.entry_id, params.store_id) =
+                    self.resolve_ids(&params.entry_id, &params.store_id)?;
+                schedule_write::update_event(&self.namespace, params)
             }
             MailCommand::ComposePrepare(request) => {
                 let this = &*self;

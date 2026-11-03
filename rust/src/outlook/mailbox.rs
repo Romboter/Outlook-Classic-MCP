@@ -512,6 +512,28 @@ fn attachment_list(item: &IDispatch) -> Vec<Value> {
         .collect()
 }
 
+fn account_list(application: &IDispatch) -> Vec<Value> {
+    let Ok(accounts) = win::object_property(application, "Session")
+        .and_then(|session| win::object_property(&session, "Accounts"))
+    else {
+        return Vec::new();
+    };
+    let count = win::int_property(&accounts, "Count")
+        .unwrap_or(0)
+        .clamp(0, 50);
+    (1..=count)
+        .filter_map(|i| {
+            let account = win::method_object(&accounts, "Item", vec![VARIANT::from(i)]).ok()?;
+            Some(json!({
+                "display_name": optional_text(&account, "DisplayName"),
+                "smtp_address": optional_text(&account, "SmtpAddress"),
+                "user_name": optional_text(&account, "UserName"),
+                "account_type": win::int_property(&account, "AccountType").ok(),
+            }))
+        })
+        .collect()
+}
+
 fn get_mail(namespace: &IDispatch, params: GetMailParams) -> Result<Value> {
     let mut args = vec![VARIANT::from(params.entry_id.as_str())];
     if let Some(ref store) = params.store_id {
@@ -588,7 +610,14 @@ impl win::Session {
         let mut response = match command {
             MailCommand::WhoAmI => {
                 let recipient = win::object_property(&self.namespace, "CurrentUser")?;
-                Ok(json!({"current_user": win::string_property(&recipient, "Name")?}))
+                let (local_time, timezone, utc_offset) = schedule::clock_info();
+                Ok(json!({
+                    "current_user": win::string_property(&recipient, "Name")?,
+                    "accounts": account_list(&self._application),
+                    "local_time": local_time,
+                    "timezone": timezone,
+                    "utc_offset": utc_offset
+                }))
             }
             MailCommand::CreateTask(params) => {
                 schedule_write::create_task(&self._application, &self.namespace, params)

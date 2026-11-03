@@ -14,7 +14,10 @@ use windows::Win32::{
     System::{
         Com::{DISPATCH_METHOD, IDispatch},
         SystemInformation::GetLocalTime,
-        Time::{SystemTimeToTzSpecificLocalTime, TzSpecificLocalTimeToSystemTime},
+        Time::{
+            GetTimeZoneInformation, SystemTimeToTzSpecificLocalTime, TIME_ZONE_INFORMATION,
+            TzSpecificLocalTimeToSystemTime,
+        },
         Variant::{
             SystemTimeToVariantTime, VAR_CHANGE_FLAGS, VARIANT, VT_DATE, VT_R8, VariantChangeType,
             VariantTimeToSystemTime,
@@ -94,6 +97,26 @@ fn offset_suffix(local: &LocalTime) -> String {
     let minutes = local.minutes() - from_system_time(&dst).minutes();
     let sign = if minutes < 0 { '-' } else { '+' };
     format!("{sign}{:02}:{:02}", minutes.abs() / 60, minutes.abs() % 60)
+}
+
+/// This machine's clock: local ISO time with offset, zone name and `+HHMM` offset.
+pub(super) fn clock_info() -> (String, String, String) {
+    let now = local_now();
+    let offset = offset_suffix(&now);
+    let mut tz = TIME_ZONE_INFORMATION::default();
+    // SAFETY: `tz` is a live local.
+    let id = unsafe { GetTimeZoneInformation(&mut tz) };
+    let raw = if id == 2 {
+        &tz.DaylightName
+    } else {
+        &tz.StandardName
+    };
+    let len = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
+    (
+        format!("{}{offset}", now.iso()),
+        String::from_utf16_lossy(&raw[..len]),
+        offset.replace(':', ""),
+    )
 }
 
 /// Bound given as local time or with an offset, resolved to local wall clock.

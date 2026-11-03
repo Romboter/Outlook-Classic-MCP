@@ -407,7 +407,8 @@ fn search_mails(namespace: &IDispatch, params: SearchMailsParams) -> Result<Valu
     let filter = match scope {
         "subject" => format!("@SQL=\"urn:schemas:httpmail:subject\" LIKE '%{safe_query}%'"),
         "from" => format!(
-            "@SQL=(\"urn:schemas:httpmail:fromname\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:fromemail\" LIKE '%{safe_query}%')"
+            "@SQL=(\"urn:schemas:httpmail:fromname\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:fromemail\" LIKE '%{safe_query}%' OR \"{}\" LIKE '%{safe_query}%')",
+            table::SENDER_SMTP
         ),
         _ => format!(
             "@SQL=(\"urn:schemas:httpmail:subject\" LIKE '%{safe_query}%' OR \"urn:schemas:httpmail:textdescription\" LIKE '%{safe_query}%')"

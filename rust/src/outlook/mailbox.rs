@@ -3,8 +3,8 @@
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
 use super::{
-    MailCommand, cancel, compose, delete, directory, indexed, meeting, modify, respond, rule,
-    schedule, schedule_write, table, win,
+    MailCommand, attachments, cancel, compose, delete, directory, indexed, meeting, modify,
+    respond, rule, schedule, schedule_write, table, win,
 };
 use crate::action::ActionKind;
 use crate::contracts::{
@@ -437,6 +437,29 @@ impl win::Session {
                 (params.entry_id, params.store_id) =
                     self.resolve_ids(&params.entry_id, &params.store_id)?;
                 schedule_write::update_event(&self.namespace, params)
+            }
+            MailCommand::ActionPrepare(mut target)
+                if target.kind == ActionKind::SaveAttachments =>
+            {
+                (target.entry_id, target.store_id) =
+                    self.resolve_ids(&target.entry_id, &target.store_id)?;
+                attachments::prepare(&self.namespace, &target)
+            }
+            MailCommand::ActionExecute {
+                mut target,
+                preview,
+            } if target.kind == ActionKind::SaveAttachments => {
+                (target.entry_id, target.store_id) =
+                    self.resolve_ids(&target.entry_id, &target.store_id)?;
+                attachments::execute(&self.namespace, &target, &preview)
+            }
+            // Saving a file leaves no mark in Outlook to look for afterwards.
+            MailCommand::ActionLocate { target, .. }
+                if target
+                    .as_ref()
+                    .is_some_and(|t| t.kind == ActionKind::SaveAttachments) =>
+            {
+                Ok(serde_json::json!({"located": "unknown"}))
             }
             MailCommand::ActionPrepare(target) if target.kind == ActionKind::InviteMeeting => {
                 meeting::prepare_invite(&self._application, &self.namespace, &target)

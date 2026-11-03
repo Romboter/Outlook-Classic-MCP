@@ -32,6 +32,8 @@ pub struct ActionSettings {
     pub response_hard_max_per_hour: usize,
     pub meeting_per_hour: usize,
     pub meeting_hard_max_per_hour: usize,
+    pub files_per_hour: usize,
+    pub files_hard_max_per_hour: usize,
     pub strict: bool,
 }
 
@@ -46,6 +48,8 @@ impl Default for ActionSettings {
             response_hard_max_per_hour: 50,
             meeting_per_hour: 10,
             meeting_hard_max_per_hour: 50,
+            files_per_hour: 10,
+            files_hard_max_per_hour: 50,
             strict: false,
         }
     }
@@ -90,6 +94,11 @@ impl ActionSettings {
                 "OUTLOOK_MCP_MEETING_HARD_MAX_PER_HOUR",
                 defaults.meeting_hard_max_per_hour,
             )?,
+            files_per_hour: number("OUTLOOK_MCP_FILES_PER_HOUR", defaults.files_per_hour)?,
+            files_hard_max_per_hour: number(
+                "OUTLOOK_MCP_FILES_HARD_MAX_PER_HOUR",
+                defaults.files_hard_max_per_hour,
+            )?,
             strict: matches!(
                 get("OUTLOOK_MCP_ACTION_STRICT")
                     .map(|v| v.trim().to_ascii_lowercase())
@@ -101,6 +110,7 @@ impl ActionSettings {
             || settings.rule_hard_max_per_hour < settings.rule_per_hour
             || settings.response_hard_max_per_hour < settings.response_per_hour
             || settings.meeting_hard_max_per_hour < settings.meeting_per_hour
+            || settings.files_hard_max_per_hour < settings.files_per_hour
         {
             return Err("hard action ceilings must not be below the usual limits".into());
         }
@@ -113,6 +123,7 @@ impl ActionSettings {
             "rules" => (self.rule_per_hour, self.rule_hard_max_per_hour),
             "responses" => (self.response_per_hour, self.response_hard_max_per_hour),
             "meetings" => (self.meeting_per_hour, self.meeting_hard_max_per_hour),
+            "files" => (self.files_per_hour, self.files_hard_max_per_hour),
             _ => (self.delete_per_hour, self.delete_hard_max_per_hour),
         }
     }
@@ -127,6 +138,7 @@ pub enum ActionKind {
     CancelMeeting,
     InviteMeeting,
     UpdateMeeting,
+    SaveAttachments,
 }
 
 impl ActionKind {
@@ -139,6 +151,7 @@ impl ActionKind {
             ActionKind::CancelMeeting => "cancel_meeting",
             ActionKind::InviteMeeting => "invite_meeting",
             ActionKind::UpdateMeeting => "update_meeting",
+            ActionKind::SaveAttachments => "save_attachments",
         }
     }
 
@@ -152,6 +165,7 @@ impl ActionKind {
             ActionKind::ToggleRule => "rules",
             ActionKind::RespondEvent => "responses",
             ActionKind::InviteMeeting | ActionKind::UpdateMeeting => "meetings",
+            ActionKind::SaveAttachments => "files",
         }
     }
 
@@ -160,6 +174,7 @@ impl ActionKind {
             "rules" => "rule changes",
             "responses" => "meeting responses",
             "meetings" => "meeting invitations and updates",
+            "files" => "attachment saves",
             _ => "deletes",
         }
     }
@@ -192,6 +207,7 @@ impl ActionTarget {
             | ActionKind::CancelMeeting
             | ActionKind::InviteMeeting
             | ActionKind::UpdateMeeting => Capability::Send,
+            ActionKind::SaveAttachments => Capability::Files,
         }
     }
 }
@@ -834,6 +850,7 @@ mod tests {
         assert_eq!(of(ActionKind::CancelMeeting, None), Capability::Send);
         assert_eq!(of(ActionKind::InviteMeeting, None), Capability::Send);
         assert_eq!(of(ActionKind::UpdateMeeting, None), Capability::Send);
+        assert_eq!(of(ActionKind::SaveAttachments, None), Capability::Files);
         assert_eq!(of(ActionKind::RespondEvent, Some(true)), Capability::Send);
         assert_eq!(of(ActionKind::RespondEvent, None), Capability::Send);
         assert_eq!(

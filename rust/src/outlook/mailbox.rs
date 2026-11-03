@@ -2,7 +2,7 @@
 //!
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
-use super::{MailCommand, directory, indexed, table, win};
+use super::{MailCommand, directory, indexed, schedule, table, win};
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
 };
@@ -48,7 +48,7 @@ pub(super) fn bool_property(object: &IDispatch, name: &str) -> bool {
     bool::try_from(&value).unwrap_or(false)
 }
 
-fn default_folder(namespace: &IDispatch, number: i32) -> Result<IDispatch> {
+pub(super) fn default_folder(namespace: &IDispatch, number: i32) -> Result<IDispatch> {
     win::method_object(namespace, "GetDefaultFolder", vec![VARIANT::from(number)])
 }
 
@@ -401,6 +401,21 @@ impl win::Session {
                 let recipient = win::object_property(&self.namespace, "CurrentUser")?;
                 Ok(json!({"current_user": win::string_property(&recipient, "Name")?}))
             }
+            MailCommand::ListEvents(params) => schedule::list_events(&self.namespace, params),
+            MailCommand::GetEvent(mut params) => {
+                let mut shim = GetMailParams {
+                    entry_id: params.entry_id.clone(),
+                    store_id: params.store_id.clone(),
+                    include_body: None,
+                    include_html: None,
+                    max_body_chars: None,
+                };
+                self.refs.resolve_input(&mut shim)?;
+                params.entry_id = shim.entry_id;
+                params.store_id = shim.store_id;
+                schedule::get_event(&self.namespace, params)
+            }
+            MailCommand::ListTasks(params) => schedule::list_tasks(&self.namespace, params),
             MailCommand::ListContacts(params) => directory::list_contacts(&self.namespace, params),
             MailCommand::SearchContacts(params) => {
                 directory::search_contacts(&self.namespace, params)

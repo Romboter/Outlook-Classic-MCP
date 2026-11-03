@@ -200,10 +200,11 @@ fn search_directory(
             continue;
         }
         let user = win::method_object(&entry, "GetExchangeUser", vec![]).ok();
+        // Missing directory details are null, as in the Python server.
         let field = |p: &str| {
             user.as_ref()
                 .map(|u| optional_text(u, p))
-                .unwrap_or_default()
+                .filter(|v| !v.is_empty())
         };
         rows.push(json!({
             "full_name": name,
@@ -308,6 +309,7 @@ pub(super) fn get_contact(namespace: &IDispatch, params: GetContactParams) -> Re
         bail!("EntryID does not identify a contact");
     }
     let mut data = contact_summary(&contact, params.store_id.as_deref().unwrap_or(""));
+    let notes_limit = params.max_notes_chars.unwrap_or(NOTES_CHARS as u32) as usize;
     let notes = optional_text(&contact, "Body");
     let object = data.as_object_mut().context("invalid contact result")?;
     for (key, prop) in [
@@ -319,11 +321,11 @@ pub(super) fn get_contact(namespace: &IDispatch, params: GetContactParams) -> Re
     }
     object.insert(
         "notes_truncated".into(),
-        json!(notes.chars().count() > NOTES_CHARS),
+        json!(notes.chars().count() > notes_limit),
     );
     object.insert(
         "notes".into(),
-        json!(notes.chars().take(NOTES_CHARS).collect::<String>()),
+        json!(notes.chars().take(notes_limit).collect::<String>()),
     );
     Ok(data)
 }

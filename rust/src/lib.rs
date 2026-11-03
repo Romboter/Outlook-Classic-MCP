@@ -3,12 +3,14 @@
 //! All mailbox operations execute on the dedicated Windows COM STA worker.
 //! No mutating tools are registered, and no Outlook data is logged to stderr.
 pub mod contracts;
+pub mod localtime;
 pub mod outlook;
 pub mod thread_text;
 
 use contracts::{
-    FolderParams, GetContactParams, GetMailParams, ListContactsParams, ListMailsParams,
-    MailCommand, ResolveNameParams, SearchContactsParams, SearchMailsParams, ThreadParams,
+    FolderParams, GetContactParams, GetEventParams, GetMailParams, ListContactsParams,
+    ListEventsParams, ListMailsParams, ListTasksParams, MailCommand, ResolveNameParams,
+    SearchContactsParams, SearchMailsParams, ThreadParams,
 };
 use outlook::OutlookBridge;
 use rmcp::{
@@ -162,7 +164,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Read one contact by handle from list/search (or raw EntryID). Notes are capped at 4000 characters (notes_truncated)."
+        description = "Read one contact by handle from list/search (or raw EntryID). Notes are capped at 4000 characters by default (max_notes_chars up to 50000; notes_truncated)."
     )]
     async fn outlook_get_contact(
         &self,
@@ -179,6 +181,36 @@ impl OutlookMcp {
         Parameters(params): Parameters<ResolveNameParams>,
     ) -> CallToolResult {
         self.call(MailCommand::ResolveName(params)).await
+    }
+
+    #[tool(
+        description = "List calendar events in a bounded local-time window (default now to +14 days; limit default 50, max 200). Recurring series are expanded by default. Pass local ISO-8601 times or times with a UTC offset (converted to local); results carry the local offset. entry_id is a short session handle."
+    )]
+    async fn outlook_list_events(
+        &self,
+        Parameters(params): Parameters<ListEventsParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::ListEvents(params)).await
+    }
+
+    #[tool(
+        description = "Read one calendar event by handle from list_events (or raw EntryID), including attendees. Body capped at 4000 characters by default (max_body_chars up to 50000; body_truncated)."
+    )]
+    async fn outlook_get_event(
+        &self,
+        Parameters(params): Parameters<GetEventParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::GetEvent(params)).await
+    }
+
+    #[tool(
+        description = "List tasks from the default Tasks folder sorted by due date (limit default 50, max 200). Completed tasks are excluded unless include_completed is true. Tasks without a date report null."
+    )]
+    async fn outlook_list_tasks(
+        &self,
+        Parameters(params): Parameters<ListTasksParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::ListTasks(params)).await
     }
 
     #[tool(description = "List the profile's color categories (name and Outlook color index).")]
@@ -220,7 +252,7 @@ mod tests {
     fn registered_tools_are_read_only() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 14);
+        assert_eq!(tools.len(), 17);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -236,6 +268,9 @@ mod tests {
             "outlook_list_categories",
             "outlook_list_rules",
             "outlook_get_out_of_office",
+            "outlook_list_events",
+            "outlook_get_event",
+            "outlook_list_tasks",
         ] {
             assert!(names.contains(&expected));
         }

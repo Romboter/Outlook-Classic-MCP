@@ -18,6 +18,9 @@ mod mailbox;
 #[path = "outlook/refs.rs"]
 mod refs;
 #[cfg(windows)]
+#[path = "outlook/schedule.rs"]
+mod schedule;
+#[cfg(windows)]
 #[path = "outlook/table.rs"]
 mod table;
 #[cfg(windows)]
@@ -245,7 +248,7 @@ mod win {
                 Com::{
                     CLSIDFromProgID, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
                     CoInitializeEx, CoUninitialize, DISPATCH_FLAGS, DISPATCH_METHOD,
-                    DISPATCH_PROPERTYGET, DISPPARAMS, IDispatch,
+                    DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT, DISPPARAMS, IDispatch,
                 },
                 Ole::GetActiveObject,
                 Variant::VARIANT,
@@ -353,6 +356,44 @@ mod win {
                 .with_context(|| format!("Outlook invoke: {member}"))?;
             Ok(result)
         }
+    }
+
+    /// Set a property on an in-memory Outlook object (used only to configure a
+    /// query collection, never to modify mailbox items).
+    pub(super) fn put_property(object: &IDispatch, member: &str, value: VARIANT) -> Result<()> {
+        const DISPID_PROPERTYPUT: i32 = -3;
+        let name: Vec<u16> = member.encode_utf16().chain(std::iter::once(0)).collect();
+        let names = [PCWSTR(name.as_ptr())];
+        let iid_null = GUID::from_u128(0);
+        let mut id = 0i32;
+        let mut args = [value];
+        let mut named = DISPID_PROPERTYPUT;
+        // SAFETY: Pointers reference live stack data and the call runs on the
+        // same STA that owns `object`.
+        unsafe {
+            object
+                .GetIDsOfNames(&iid_null, names.as_ptr(), 1, 0, &mut id)
+                .with_context(|| format!("Outlook member lookup: {member}"))?;
+            let parameters = DISPPARAMS {
+                rgvarg: args.as_mut_ptr(),
+                rgdispidNamedArgs: &mut named,
+                cArgs: 1,
+                cNamedArgs: 1,
+            };
+            object
+                .Invoke(
+                    id,
+                    &iid_null,
+                    0,
+                    DISPATCH_PROPERTYPUT,
+                    &parameters,
+                    None,
+                    None,
+                    None,
+                )
+                .with_context(|| format!("Outlook set: {member}"))?;
+        }
+        Ok(())
     }
 
     pub(super) fn property(object: &IDispatch, member: &str) -> Result<VARIANT> {

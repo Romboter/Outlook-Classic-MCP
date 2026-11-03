@@ -16,6 +16,9 @@ mod indexed;
 #[path = "outlook/mailbox.rs"]
 mod mailbox;
 #[cfg(windows)]
+#[path = "outlook/modify.rs"]
+mod modify;
+#[cfg(windows)]
 #[path = "outlook/refs.rs"]
 mod refs;
 #[cfg(windows)]

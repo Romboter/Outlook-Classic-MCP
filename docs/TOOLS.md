@@ -1,6 +1,6 @@
 # Rust MCP tool reference
 
-**As of the issue #9 batch 2 branch (draft, stacked on batch 1):** One diagnostic tool and sixteen **experimental, read-only** Outlook Classic tools (six mail/folder/thread, seven contacts/categories/rules/out-of-office, and three calendar/task reads) are registered in `rust/src/lib.rs`. This inventory is grounded in `rust/src/contracts.rs`; it is not a live Outlook verification.
+**As of the issue #9 first-writes branch (draft, stacked on #8 gating):** One diagnostic tool and sixteen **experimental read** Outlook Classic tools (six mail/folder/thread, seven contacts/categories/rules/out-of-office, and three calendar/task reads) and four gated **modify** tools (mark, categorize, create folder, move). Modify tools are refused unless the server runs with `OUTLOOK_MCP_MODE=full` and `modify` is not denied are registered in `rust/src/lib.rs`. This inventory is grounded in `rust/src/contracts.rs`; it is not a live Outlook verification.
 
 | Tool | Main inputs | Defaults / limits | Output or caveat |
 | --- | --- | --- | --- |
@@ -20,6 +20,10 @@
 | `outlook_list_events` | `start?`, `end?`, `limit?`, `include_recurrences?` | window default now to +14 days, no maximum; limit 50 / max 200 (matches Python) | Default-store calendar. ISO-8601 local times or times with `Z`/an offset (converted to local); results carry the local UTC offset like Python. Recurrences expanded by default; `has_more` and `scan_truncated` added; end must be after start |
 | `outlook_get_event` | `entry_id`, `store_id?`, `max_body_chars?` | body 4,000 chars default / 50,000 max | Handle from `list_events` or raw EntryID; includes attendees (max 500), reminder, categories; `body_truncated` added. Rejects non-appointment items |
 | `outlook_list_tasks` | `limit?`, `include_completed?` | limit 50 / max 200 (matches Python); open tasks only by default | Default Tasks folder sorted by due date; dates carry the local UTC offset; unset dates are `null` (Python emitted the year-4501 placeholder) |
+| `outlook_mark_mail` | `entry_id`, `store_id?`, `read?`, `flagged?` | at least one of `read`/`flagged` | **Modify** (server mode `full`). Reports the state Outlook holds afterwards; `status` is `unverified` if it differs from the request. Python silently accepted a no-op call |
+| `outlook_set_category` | `entry_id`, `store_id?`, `categories` | max 500 chars | **Modify**. Replaces the item's categories (semicolon-separated; empty clears). Reads back the stored value |
+| `outlook_create_folder` | `name`, `parent?` | name 1..120 chars, no slashes; parent default Inbox | **Modify**. Fails if the name exists. Returns `path` only (Python also returned a folder `entry_id`, which no tool can use) |
+| `outlook_move_mail` | `entry_id`, `store_id?`, `target_folder` | Deleted Items refused | **Modify**. Returns the item's NEW handle as `entry_id` (Python: `new_entry_id`); the old handle is stale. Moving into Deleted Items is a delete and is refused until a gated delete tool exists |
 | `outlook_get_thread` | `entry_id`, `store_id?`, `max_messages?`, `include_bodies?`, `trim_quoted?`, `per_message_chars?`, `total_body_chars?` | 10 / max 30 messages; per-body 1,500 / max 6,000; total 8,000 / max 24,000 | Exact ConversationID; only recognized quote tails trimmed, omissions flagged |
 
 All mail list/search/thread messages should return compact in-memory `entry_id` handles such as `m1` rather than raw EntryIDs/StoreIDs. Handles expire on restart and may be evicted; repeat search/list when `outlook_get_mail` says a reference is unknown. Raw IDs can still be supplied for compatibility but **do not share them in issues**.

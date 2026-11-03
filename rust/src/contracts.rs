@@ -145,8 +145,52 @@ pub struct ListTasksParams {
     pub include_completed: Option<bool>,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct MarkMailParams {
+    /// Short handle from list/search (e.g. m1), or a raw Outlook EntryID.
+    pub entry_id: String,
+    /// StoreID for raw identifiers in non-default stores.
+    pub store_id: Option<String>,
+    /// true marks read, false marks unread, omit for no change.
+    pub read: Option<bool>,
+    /// true flags for follow-up, false clears the flag, omit for no change.
+    pub flagged: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct SetCategoryParams {
+    /// Short handle from list/search, or a raw Outlook EntryID.
+    pub entry_id: String,
+    /// StoreID for raw identifiers in non-default stores.
+    pub store_id: Option<String>,
+    /// Semicolon-separated category names that REPLACE the item's categories. Empty clears them.
+    pub categories: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CreateFolderParams {
+    /// Name of the new folder (1..120 characters, no slashes).
+    pub name: String,
+    /// Parent folder. Defaults to Inbox.
+    pub parent: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct MoveMailParams {
+    /// Short handle from list/search, or a raw Outlook EntryID.
+    pub entry_id: String,
+    /// StoreID for raw identifiers in non-default stores.
+    pub store_id: Option<String>,
+    /// Destination folder: Inbox, Sent Items, Drafts or a relative path. Deleted Items is refused.
+    pub target_folder: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum MailCommand {
+    MarkMail(MarkMailParams),
+    SetCategory(SetCategoryParams),
+    CreateFolder(CreateFolderParams),
+    MoveMail(MoveMailParams),
     ListEvents(ListEventsParams),
     GetEvent(GetEventParams),
     ListTasks(ListTasksParams),
@@ -173,6 +217,16 @@ pub fn query_words(query: &str) -> Vec<String> {
 pub fn matches_all(haystack: &str, words: &[String]) -> bool {
     let haystack = haystack.to_lowercase();
     words.iter().all(|w| haystack.contains(w.as_str()))
+}
+
+fn checked_id(entry_id: &str, store_id: Option<&str>) -> Result<(), String> {
+    if entry_id.is_empty()
+        || entry_id.len() > 4096
+        || store_id.is_some_and(|s| s.is_empty() || s.len() > 4096)
+    {
+        return Err("invalid EntryID/StoreID".into());
+    }
+    Ok(())
 }
 
 fn checked_text(value: &str, what: &str) -> Result<(), String> {
@@ -204,6 +258,10 @@ impl MailCommand {
             | MailCommand::SearchMails(_)
             | MailCommand::GetMail(_)
             | MailCommand::GetThread(_) => Capability::Read,
+            MailCommand::MarkMail(_)
+            | MailCommand::SetCategory(_)
+            | MailCommand::CreateFolder(_)
+            | MailCommand::MoveMail(_) => Capability::Modify,
         }
     }
 }
@@ -240,6 +298,50 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         | MailCommand::ListCategories
         | MailCommand::ListRules
         | MailCommand::GetOutOfOffice => Ok(()),
+        MailCommand::MarkMail(x) => {
+            checked_id(&x.entry_id, x.store_id.as_deref())?;
+            if x.read.is_none() && x.flagged.is_none() {
+                return Err("set read and/or flagged; nothing to change".into());
+            }
+            Ok(())
+        }
+        MailCommand::SetCategory(x) => {
+            checked_id(&x.entry_id, x.store_id.as_deref())?;
+            if x.categories.chars().count() > 500 || x.categories.chars().any(char::is_control) {
+                return Err(
+                    "categories must be at most 500 characters without control characters".into(),
+                );
+            }
+            Ok(())
+        }
+        MailCommand::CreateFolder(x) => {
+            let name = x.name.trim();
+            if name.is_empty()
+                || x.name.chars().count() > 120
+                || name == "."
+                || name == ".."
+                || x.name
+                    .chars()
+                    .any(|c| c.is_control() || c == '/' || c == '\\')
+            {
+                return Err("folder name must be 1..120 characters without slashes".into());
+            }
+            if x.parent.as_deref().is_some_and(|p| p.chars().count() > 300) {
+                return Err("parent path is too long".into());
+            }
+            Ok(())
+        }
+        MailCommand::MoveMail(x) => {
+            checked_id(&x.entry_id, x.store_id.as_deref())?;
+            checked_text(&x.target_folder, "target_folder")?;
+            let key = x.target_folder.trim().to_ascii_lowercase();
+            if key == "deleted" || key == "deleted items" {
+                return Err(
+                    "moving mail into Deleted Items is a delete and is not allowed here".into(),
+                );
+            }
+            Ok(())
+        }
         MailCommand::ListEvents(x) => {
             checked_limit_in(x.limit, 50, 200)?;
             let start = x
@@ -429,6 +531,55 @@ mod tests {
         let mut empty = params;
         empty.entry_id.clear();
         assert!(validate_command(&MailCommand::GetThread(empty)).is_err());
+    }
+
+    #[test]
+    fn modifying_commands_need_the_modify_capability_and_valid_input() {
+        let mark = |read, flagged| {
+            MailCommand::MarkMail(MarkMailParams {
+                entry_id: "m1".into(),
+                store_id: None,
+                read,
+                flagged,
+            })
+        };
+        assert_eq!(mark(Some(true), None).capability(), Capability::Modify);
+        assert!(validate_command(&mark(Some(true), None)).is_ok());
+        assert!(validate_command(&mark(None, None)).is_err());
+        let category = |c: &str| {
+            MailCommand::SetCategory(SetCategoryParams {
+                entry_id: "m1".into(),
+                store_id: None,
+                categories: c.into(),
+            })
+        };
+        assert_eq!(category("").capability(), Capability::Modify);
+        assert!(validate_command(&category("Red Category; Blue")).is_ok());
+        assert!(validate_command(&category("")).is_ok());
+        assert!(validate_command(&category("bad\u{7}")).is_err());
+        let folder = |n: &str| {
+            MailCommand::CreateFolder(CreateFolderParams {
+                name: n.into(),
+                parent: None,
+            })
+        };
+        assert_eq!(folder("x").capability(), Capability::Modify);
+        for bad in ["", " ", "..", "a/b", "a\\b", "bad\nname"] {
+            assert!(validate_command(&folder(bad)).is_err(), "{bad:?}");
+        }
+        assert!(validate_command(&folder("Projects 2026")).is_ok());
+        let moving = |t: &str| {
+            MailCommand::MoveMail(MoveMailParams {
+                entry_id: "m1".into(),
+                store_id: None,
+                target_folder: t.into(),
+            })
+        };
+        assert_eq!(moving("Archive").capability(), Capability::Modify);
+        assert!(validate_command(&moving("Inbox/Projects")).is_ok());
+        for blocked in ["Deleted Items", " deleted ", "DELETED ITEMS"] {
+            assert!(validate_command(&moving(blocked)).is_err(), "{blocked}");
+        }
     }
 
     #[test]

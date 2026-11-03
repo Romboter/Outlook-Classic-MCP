@@ -7,6 +7,9 @@ use crate::ticket::{NOT_SENT, Ticket, TimeoutVerdict, UNKNOWN_OUTCOME, timeout_v
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 #[cfg(windows)]
+#[path = "outlook/attachments.rs"]
+mod attachments;
+#[cfg(windows)]
 #[path = "outlook/cancel.rs"]
 mod cancel;
 #[cfg(windows)]

@@ -648,6 +648,38 @@ pub fn prepare_update_meeting(x: &UpdateEventParams) -> Result<ActionTarget, Str
     })
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct SaveAttachmentsParams {
+    /// Short handle from list/search, or a raw Outlook EntryID, of the mail.
+    pub entry_id: String,
+    pub store_id: Option<String>,
+    /// Absolute path of an existing directory under your user profile.
+    pub output_dir: String,
+    /// 1-indexed attachment. Omit to save all.
+    pub attachment_index: Option<u32>,
+}
+
+pub fn prepare_save_attachments(x: &SaveAttachmentsParams) -> Result<ActionTarget, String> {
+    checked_id(&x.entry_id, x.store_id.as_deref())?;
+    let dir = x.output_dir.trim();
+    if dir.is_empty() || dir.chars().count() > 1000 || dir.chars().any(char::is_control) {
+        return Err("output_dir must be an absolute path of 1..1000 characters".into());
+    }
+    if x.attachment_index == Some(0) {
+        return Err("attachment_index is 1-indexed".into());
+    }
+    Ok(ActionTarget {
+        kind: ActionKind::SaveAttachments,
+        entry_id: x.entry_id.clone(),
+        store_id: x.store_id.clone(),
+        enabled: None,
+        response: None,
+        payload: Some(serde_json::json!({
+            "output_dir": dir, "index": x.attachment_index,
+        })),
+    })
+}
+
 pub fn prepare_cancel_meeting(x: &DeleteItemParams) -> Result<ActionTarget, String> {
     prepare_delete(x, ActionKind::CancelMeeting)
 }

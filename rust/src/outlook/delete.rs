@@ -79,7 +79,8 @@ fn check_kind(item: &IDispatch, kind: ActionKind) -> Result<()> {
         | ActionKind::RespondEvent
         | ActionKind::CancelMeeting
         | ActionKind::InviteMeeting
-        | ActionKind::UpdateMeeting => {
+        | ActionKind::UpdateMeeting
+        | ActionKind::SaveAttachments => {
             bail!("not an item to delete")
         }
     }
@@ -163,7 +164,8 @@ fn facts_of(item: &IDispatch, kind: ActionKind) -> (String, Vec<Fact>, Vec<Strin
         | ActionKind::RespondEvent
         | ActionKind::CancelMeeting
         | ActionKind::InviteMeeting
-        | ActionKind::UpdateMeeting => (String::new(), vec![], vec![], String::new()),
+        | ActionKind::UpdateMeeting
+        | ActionKind::SaveAttachments => (String::new(), vec![], vec![], String::new()),
     }
 }
 
@@ -174,7 +176,6 @@ fn hash_of(raw_entry_id: &str, identity: &str) -> String {
 pub(super) fn prepare(namespace: &IDispatch, target: &ActionTarget) -> Result<Value> {
     let item = item_by_id(namespace, target)?;
     check_allowed(namespace, &item, target)?;
-    let (summary, facts, warnings, identity) = facts_of(&item, target.kind);
     let action_id = new_id();
     // The stamp lets a later check find the item in Deleted Items even though
     // its EntryID changes when it moves.
@@ -190,6 +191,9 @@ pub(super) fn prepare(namespace: &IDispatch, target: &ActionTarget) -> Result<Va
     )?;
     win::put_property(&stamp, "Value", VARIANT::from(action_id.as_str()))?;
     win::invoke(&item, "Save", DISPATCH_METHOD, vec![])?;
+    // Read the facts after saving: saving changes an unsent draft's timestamps,
+    // and the hash must match what execute reads back.
+    let (summary, facts, warnings, identity) = facts_of(&item, target.kind);
     Ok(json!({"preview": ActionPreview {
         action_id,
         summary,

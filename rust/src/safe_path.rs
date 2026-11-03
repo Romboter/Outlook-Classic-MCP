@@ -1,5 +1,4 @@
-//! Validation for files an attachment tool may write. Nothing here is wired
-//! to a tool yet; it exists so the checks are tested before one is added.
+//! Validation for files `outlook_save_attachments` may write.
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -31,6 +30,60 @@ pub fn validate_filename(name: &str) -> Result<&str, String> {
         return bad("reserved device name");
     }
     Ok(name)
+}
+
+/// Extensions that can run code when opened. Checked on the last extension, so
+/// `invoice.pdf.exe` is caught.
+const EXECUTABLE: [&str; 28] = [
+    "exe",
+    "dll",
+    "js",
+    "jse",
+    "vbs",
+    "vbe",
+    "ps1",
+    "psm1",
+    "bat",
+    "cmd",
+    "com",
+    "lnk",
+    "scr",
+    "msi",
+    "msp",
+    "hta",
+    "cpl",
+    "jar",
+    "reg",
+    "wsf",
+    "wsh",
+    "pif",
+    "inf",
+    "url",
+    "msc",
+    "gadget",
+    "application",
+    "appref-ms",
+];
+
+/// Why a file must not be saved, naming the file, or `None` when it may be.
+pub fn refusal_reason(name: &str) -> Option<String> {
+    if let Err(why) = validate_filename(name) {
+        return Some(format!("{name} was not saved: {why}"));
+    }
+    let extension = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    if extension.is_some_and(|e| EXECUTABLE.contains(&e.as_str())) {
+        return Some(format!(
+            "{name} was not saved: executable and script files can run code when opened"
+        ));
+    }
+    None
+}
+
+/// The path as Outlook's `SaveAsFile` wants it: canonicalizing adds a
+/// verbatim `\\?\` prefix that Outlook does not accept.
+pub fn plain_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
 }
 
 /// Resolve `requested` to a real directory inside one of `allowed_roots`.
@@ -102,6 +155,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn executables_and_scripts_are_refused_with_the_file_named() {
+        for bad in [
+            "invoice.exe",
+            "Run.PS1",
+            "a.pdf.exe",
+            "x.lnk",
+            "setup.MSI",
+            "con.txt",
+        ] {
+            let reason = refusal_reason(bad).expect(bad);
+            assert!(reason.starts_with(bad), "{reason}");
+        }
+        assert!(refusal_reason("invoice.exe").unwrap().contains("run code"));
+        for ok in ["report.pdf", "photo.jpeg", "notes", "exe.txt", "macro.docm"] {
+            assert!(refusal_reason(ok).is_none(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn plain_path_drops_the_verbatim_prefix() {
+        assert_eq!(plain_path(Path::new(r"\\?\C:\Users\a")), r"C:\Users\a");
+        assert_eq!(plain_path(Path::new(r"C:\x")), r"C:\x");
     }
 
     #[test]

@@ -22,11 +22,11 @@ use contracts::{
     CreateTaskParams, DeleteItemParams, FolderParams, ForwardMailParams, GetContactParams,
     GetEventParams, GetMailParams, ListContactsParams, ListEventsParams, ListMailsParams,
     ListTasksParams, MailCommand, MarkMailParams, MoveMailParams, ReplyMailParams,
-    ResolveNameParams, RespondEventParams, SearchContactsParams, SearchMailsParams,
-    SendDraftParams, SendMailParams, SetCategoryParams, ThreadParams, ToggleRuleParams,
-    UpdateEventParams, checked_send_id, prepare_cancel_meeting, prepare_delete,
+    ResolveNameParams, RespondEventParams, SaveAttachmentsParams, SearchContactsParams,
+    SearchMailsParams, SendDraftParams, SendMailParams, SetCategoryParams, ThreadParams,
+    ToggleRuleParams, UpdateEventParams, checked_send_id, prepare_cancel_meeting, prepare_delete,
     prepare_forward_mail, prepare_invite_meeting, prepare_reply_mail, prepare_respond_event,
-    prepare_send_mail, prepare_toggle_rule, prepare_update_meeting,
+    prepare_save_attachments, prepare_send_mail, prepare_toggle_rule, prepare_update_meeting,
 };
 use outlook::OutlookBridge;
 use policy::{Capability, Policy};
@@ -901,6 +901,26 @@ impl OutlookMcp {
     }
 
     #[tool(
+        description = "Save one or all attachments of a mail into an existing folder under the user's profile, only after the user approves a prompt listing the message, every file name and size and the folder. Nothing is overwritten (a taken name gets ' (1)'). Executable and script files (.exe, .js, .ps1, .lnk, ...) are NOT saved; the prompt and summary name each refused file and say why. Requires files permission (server mode full). Nothing is saved if the client cannot show the prompt. Check `done` in the result.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_save_attachments(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<SaveAttachmentsParams>,
+    ) -> CallToolResult {
+        match prepare_save_attachments(&params) {
+            Ok(target) => self.confirmed(peer, target).await,
+            Err(error) => text_error(error),
+        }
+    }
+
+    #[tool(
         description = "After a delete, rule change or meeting answer reported unknown_outcome (or to confirm one), look for the item by its action_id: done, not_done or unknown. Read-only. Never try a delete again before checking.",
         annotations(
             read_only_hint = true,
@@ -1020,7 +1040,7 @@ mod tests {
     fn registered_tools_exclude_not_yet_implemented_writes() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 37);
+        assert_eq!(tools.len(), 38);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -1059,10 +1079,9 @@ mod tests {
             "outlook_respond_event",
             "outlook_cancel_meeting",
             "outlook_update_meeting",
+            "outlook_save_attachments",
         ] {
             assert!(names.contains(&expected));
         }
-        // Not implemented yet.
-        assert!(!names.contains(&"outlook_save_attachments"));
     }
 }

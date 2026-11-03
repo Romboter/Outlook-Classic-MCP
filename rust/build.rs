@@ -5,10 +5,9 @@ fn main() {
         let dep = "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' \
                    version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' \
                    language='*'";
-        for kind in ["bins", "examples"] {
-            println!("cargo:rustc-link-arg-{kind}=/MANIFEST:EMBED");
-            println!("cargo:rustc-link-arg-{kind}={dep}");
-        }
+        // All targets: the lib's unit-test exe imports the dialog code too.
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg={dep}");
     }
     println!("cargo:rerun-if-changed=build.rs");
 }

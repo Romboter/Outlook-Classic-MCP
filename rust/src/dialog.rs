@@ -136,7 +136,12 @@ fn show(request: &Request) -> Decision {
         pszWindowTitle: PCWSTR(title.as_ptr()),
         pszMainInstruction: PCWSTR(headline.as_ptr()),
         pszContent: PCWSTR(summary.as_ptr()),
-        pszExpandedInformation: PCWSTR(details.as_ptr()),
+        // No expander when there is nothing more to show.
+        pszExpandedInformation: if request.details.is_empty() {
+            PCWSTR::null()
+        } else {
+            PCWSTR(details.as_ptr())
+        },
         pszExpandedControlText: PCWSTR(expand.as_ptr()),
         pszCollapsedControlText: PCWSTR(collapse.as_ptr()),
         pszFooter: PCWSTR(footer.as_ptr()),

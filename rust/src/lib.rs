@@ -4,6 +4,7 @@
 //! Mutating tools exist only behind the server-side permission policy, and no
 //! Outlook data is logged to stderr.
 pub mod action;
+pub mod approval;
 pub mod contracts;
 #[cfg(windows)]
 pub mod dialog;
@@ -19,6 +20,7 @@ use action::{
     ActionEngine, ActionKind, ActionLedger, ActionPort, ActionPreview, ActionSettings,
     ActionTarget, Located, PreparedAction,
 };
+use approval::{ApprovalMode, Backend};
 use contracts::{
     CheckActionParams, CheckSendParams, CompleteTaskParams, CreateEventParams, CreateFolderParams,
     CreateTaskParams, DeleteItemParams, FolderParams, ForwardMailParams, GetContactParams,
@@ -79,6 +81,7 @@ pub struct OutlookMcp {
     ledger: Arc<SendLedger>,
     action_settings: ActionSettings,
     action_ledger: Arc<ActionLedger>,
+    approval: ApprovalMode,
 }
 
 /// The form the host shows the human. Only a person at the host can fill it in.
@@ -89,16 +92,19 @@ struct SendDecision {
 }
 elicit_safe!(SendDecision);
 
-struct ElicitConfirmer {
+const APPROVAL_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Asks a person through the backend chosen by `OUTLOOK_MCP_APPROVAL`.
+struct ApprovalConfirmer {
     peer: Peer<RoleServer>,
+    mode: ApprovalMode,
 }
 
-impl Confirmer for ElicitConfirmer {
-    async fn confirm(&self, prompt: &str) -> Confirmation {
-        let wait = std::time::Duration::from_secs(120);
+impl ApprovalConfirmer {
+    async fn elicit(&self, prompt: &str) -> Confirmation {
         match self
             .peer
-            .elicit_with_timeout::<SendDecision>(prompt, Some(wait))
+            .elicit_with_timeout::<SendDecision>(prompt, Some(APPROVAL_WAIT))
             .await
         {
             Ok(Some(decision)) if decision.confirm => Confirmation::Accepted,
@@ -107,6 +113,50 @@ impl Confirmer for ElicitConfirmer {
             _ => Confirmation::Declined,
         }
     }
+
+    #[cfg(windows)]
+    async fn dialog(prompt: &str) -> Confirmation {
+        // One window at a time, so a second request cannot be answered by mistake.
+        static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let (summary, details) = approval::split_prompt(prompt);
+        let request = dialog::Request {
+            title: "Outlook MCP: approval needed".into(),
+            headline: "Approve this Outlook action?".into(),
+            summary,
+            details,
+            timeout: APPROVAL_WAIT,
+        };
+        let decision = tokio::task::spawn_blocking(move || {
+            let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+            dialog::approve(request)
+        })
+        .await;
+        match decision {
+            Ok(dialog::Decision::Approved) => Confirmation::Accepted,
+            // Closed, declined, timed out or failed to show: never act.
+            _ => Confirmation::Declined,
+        }
+    }
+
+    #[cfg(not(windows))]
+    async fn dialog(_prompt: &str) -> Confirmation {
+        Confirmation::Unsupported
+    }
+}
+
+impl Confirmer for ApprovalConfirmer {
+    async fn confirm(&self, prompt: &str) -> Confirmation {
+        match self.mode.choose(client_elicits(&self.peer)) {
+            Backend::Elicitation => self.elicit(prompt).await,
+            Backend::Dialog => Self::dialog(prompt).await,
+            Backend::Unavailable => Confirmation::Unsupported,
+        }
+    }
+}
+
+fn client_elicits(peer: &Peer<RoleServer>) -> bool {
+    peer.supported_elicitation_modes()
+        .contains(&rmcp::service::ElicitationMode::Form)
 }
 
 /// The send pipeline's view of Outlook: each step is one short call on the COM worker.
@@ -291,6 +341,7 @@ impl OutlookMcp {
             ledger: Arc::default(),
             action_settings: ActionSettings::default(),
             action_ledger: Arc::default(),
+            approval: ApprovalMode::Dialog,
         }
     }
 
@@ -300,22 +351,34 @@ impl OutlookMcp {
         self
     }
 
+    /// Choose how approval prompts are shown (`OUTLOOK_MCP_APPROVAL`).
+    pub fn with_approval(mut self, approval: ApprovalMode) -> Self {
+        self.approval = approval;
+        self
+    }
+
     fn action_engine(
         &self,
         peer: Peer<RoleServer>,
-    ) -> ActionEngine<BridgeActionPort<'_>, ElicitConfirmer> {
+    ) -> ActionEngine<BridgeActionPort<'_>, ApprovalConfirmer> {
         ActionEngine::with_ledger(
             BridgeActionPort(self),
-            ElicitConfirmer { peer },
+            ApprovalConfirmer {
+                peer,
+                mode: self.approval,
+            },
             self.action_settings.clone(),
             Arc::clone(&self.action_ledger),
         )
     }
 
-    fn engine(&self, peer: Peer<RoleServer>) -> Engine<BridgePort<'_>, ElicitConfirmer> {
+    fn engine(&self, peer: Peer<RoleServer>) -> Engine<BridgePort<'_>, ApprovalConfirmer> {
         Engine::with_ledger(
             BridgePort(self),
-            ElicitConfirmer { peer },
+            ApprovalConfirmer {
+                peer,
+                mode: self.approval,
+            },
             self.send_settings.clone(),
             Arc::clone(&self.ledger),
         )
@@ -391,10 +454,10 @@ impl OutlookMcp {
             .expect("serialization of static fields cannot fail");
         status["permission_mode"] = serde_json::json!(self.policy.describe());
         // Without this the host cannot show send confirmations; sends then save drafts.
-        status["client_supports_elicitation"] = serde_json::json!(
-            peer.supported_elicitation_modes()
-                .contains(&rmcp::service::ElicitationMode::Form)
-        );
+        status["client_supports_elicitation"] = serde_json::json!(client_elicits(&peer));
+        status["approval_mode"] = serde_json::json!(self.approval.name());
+        status["approval_backend"] =
+            serde_json::json!(format!("{:?}", self.approval.choose(client_elicits(&peer))));
         status.to_string()
     }
 

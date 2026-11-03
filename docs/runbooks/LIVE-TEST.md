@@ -89,7 +89,7 @@ Note the `elapsed_ms` and `backend` fields on every list and search response.
 | 5.1 | `outlook_list_mails` `{"limit":31}` | validation error | |
 | 5.2 | `outlook_get_mail` `{"entry_id":"<handle>","include_html":true}` | explicit "not supported" error | |
 | 5.3 | `outlook_search_mails` `{"query":"x","backend":"table","scope":"subject_body"}` | rejects the combination | |
-| 5.4 | `outlook_search_mails` with `since` or `until` set | "unsupported" error, filter not silently ignored | |
+| 5.4 | `outlook_list_mails` `{"since":"<yesterday>T00:00:00","limit":30}`, once with `backend:"table"` and once with `backend:"legacy"` | Only mail received on or after that local time, same count on both backends; `since` after `until` or a `Z` suffix is a validation error | |
 | 5.5 | `outlook_get_mail` `{"entry_id":"m9999"}` | clear error telling you to search again | |
 | 5.6 | Disconnect Inspector, reconnect, then call `outlook_get_mail` with an old handle | clear stale-handle error; a fresh search gives new handles | |
 | 5.7 | Close Outlook, call `outlook_whoami`, reopen Outlook, call again | error while closed, recovers after reopen (the server may need restarting; note which) | |

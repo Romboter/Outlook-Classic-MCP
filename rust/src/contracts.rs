@@ -27,9 +27,9 @@ pub struct ListMailsParams {
     pub unread_only: Option<bool>,
     /// Filter by sender address or display name (substring).
     pub from_address: Option<String>,
-    /// ISO-8601 lower date bound, reserved for future compatibility.
+    /// Local wall-clock lower bound on received time (`YYYY-MM-DD[THH:MM[:SS]]`), inclusive.
     pub since: Option<String>,
-    /// ISO-8601 upper date bound, reserved for future compatibility.
+    /// Local wall-clock upper bound on received time, inclusive.
     pub until: Option<String>,
     /// Force auto, table or legacy backend to compare identical queries.
     pub backend: Option<String>,
@@ -999,12 +999,7 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
             if x.offset.unwrap_or(0) > 1000 {
                 return Err("offset must be 0..1000".into());
             }
-            if x.since.is_some() || x.until.is_some() {
-                return Err(
-                    "since/until filters are not yet implemented; no date filter was applied"
-                        .into(),
-                );
-            }
+            received_filter(x.since.as_deref(), x.until.as_deref())?;
             Ok(())
         }
         MailCommand::SearchMails(x) => {
@@ -1059,6 +1054,30 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
     }
 }
 
+/// Restrict/GetTable filter on `[ReceivedTime]` for local wall-clock bounds
+/// (inclusive, like Python). Empty when neither bound is set.
+pub fn received_filter(since: Option<&str>, until: Option<&str>) -> Result<String, String> {
+    let parse =
+        |value: &str, name: &str| LocalTime::parse(value).map_err(|e| format!("{name}: {e}"));
+    let since = since.map(|v| parse(v, "since")).transpose()?;
+    let until = until.map(|v| parse(v, "until")).transpose()?;
+    if let (Some(s), Some(u)) = (&since, &until)
+        && s.minutes() > u.minutes()
+    {
+        return Err("since must not be after until".into());
+    }
+    let clauses: Vec<String> = since
+        .iter()
+        .map(|t| format!("[ReceivedTime] >= '{}'", t.jet()))
+        .chain(
+            until
+                .iter()
+                .map(|t| format!("[ReceivedTime] <= '{}'", t.jet())),
+        )
+        .collect();
+    Ok(clauses.join(" AND "))
+}
+
 pub fn escape_dasl(raw: &str) -> String {
     // User text is always a single-quoted DASL literal; double apostrophes
     // to prevent injection. Double quotes inside the value are harmless and
@@ -1070,18 +1089,22 @@ pub fn escape_dasl(raw: &str) -> String {
 mod tests {
     use super::*;
     #[test]
-    fn rejects_unimplemented_options_rather_than_ignoring_them() {
-        let req = MailCommand::ListMails(ListMailsParams {
-            folder: None,
-            limit: None,
-            offset: None,
-            unread_only: None,
-            from_address: None,
-            since: Some("2026-01-01".into()),
-            until: None,
-            backend: None,
-        });
-        assert!(validate_command(&req).is_err());
+    fn received_filter_builds_inclusive_local_bounds() {
+        assert_eq!(received_filter(None, None).unwrap(), "");
+        assert_eq!(
+            received_filter(Some("2026-11-02T00:00:00"), None).unwrap(),
+            "[ReceivedTime] >= '11/02/2026 12:00 AM'"
+        );
+        assert_eq!(
+            received_filter(Some("2026-11-02"), Some("2026-11-03T14:30")).unwrap(),
+            "[ReceivedTime] >= '11/02/2026 12:00 AM' AND [ReceivedTime] <= '11/03/2026 02:30 PM'"
+        );
+    }
+    #[test]
+    fn received_filter_rejects_bad_or_reversed_bounds() {
+        assert!(received_filter(Some("yesterday"), None).is_err());
+        assert!(received_filter(Some("2026-11-02T00:00:00Z"), None).is_err());
+        assert!(received_filter(Some("2026-11-03"), Some("2026-11-02")).is_err());
     }
     #[test]
     fn enforces_bounds() {

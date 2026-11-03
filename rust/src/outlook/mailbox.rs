@@ -3,7 +3,7 @@
 //! No COM interface leaves this thread. List/search materialize bounded,
 //! metadata-only JSON results; bodies are read only by GetMail.
 use super::{
-    MailCommand, compose, directory, indexed, modify, schedule, schedule_write, table, win,
+    MailCommand, compose, delete, directory, indexed, modify, schedule, schedule_write, table, win,
 };
 use crate::contracts::{
     FolderParams, GetMailParams, ListMailsParams, SearchMailsParams, checked_limit, escape_dasl,
@@ -435,6 +435,28 @@ impl win::Session {
                 (params.entry_id, params.store_id) =
                     self.resolve_ids(&params.entry_id, &params.store_id)?;
                 schedule_write::update_event(&self.namespace, params)
+            }
+            MailCommand::ActionPrepare(mut target) => {
+                (target.entry_id, target.store_id) =
+                    self.resolve_ids(&target.entry_id, &target.store_id)?;
+                delete::prepare(&self.namespace, &target)
+            }
+            MailCommand::ActionExecute {
+                mut target,
+                preview,
+            } => {
+                (target.entry_id, target.store_id) =
+                    self.resolve_ids(&target.entry_id, &target.store_id)?;
+                delete::execute(&self.namespace, &target, &preview)
+            }
+            MailCommand::ActionLocate {
+                action_id,
+                mut target,
+            } => {
+                if let Some(t) = target.as_mut() {
+                    (t.entry_id, t.store_id) = self.resolve_ids(&t.entry_id, &t.store_id)?;
+                }
+                delete::locate(&self.namespace, &action_id, target.as_ref())
             }
             MailCommand::ComposePrepare(request) => {
                 let this = &*self;

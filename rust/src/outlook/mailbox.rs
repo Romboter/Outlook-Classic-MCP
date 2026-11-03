@@ -239,6 +239,9 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
     let instant_search_enabled = table::store_instant_search(&folder);
 
     let backend = params.backend.as_deref().unwrap_or("auto");
+    let date_filter =
+        crate::contracts::received_filter(params.since.as_deref(), params.until.as_deref())
+            .map_err(anyhow::Error::msg)?;
     let queried = if backend == "legacy" {
         None
     } else {
@@ -246,7 +249,7 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
             &folder,
             &store_id,
             table::RowOptions {
-                filter: "",
+                filter: &date_filter,
                 limit,
                 offset,
                 unread_only: params.unread_only.unwrap_or(false),
@@ -269,7 +272,14 @@ fn list_mails(namespace: &IDispatch, params: ListMailsParams) -> Result<Value> {
         _ => {
             // Preserve function on stores that reject Table columns/filters.
             // Never imply that the fallback was fast or indexed.
-            let items = win::object_property(&folder, "Items")?;
+            let mut items = win::object_property(&folder, "Items")?;
+            if !date_filter.is_empty() {
+                items = win::method_object(
+                    &items,
+                    "Restrict",
+                    vec![VARIANT::from(date_filter.as_str())],
+                )?;
+            }
             sort_received(&items)?;
             let (rows, has_more) = collect_items(
                 &items,

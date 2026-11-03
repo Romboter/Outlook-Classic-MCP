@@ -7,7 +7,7 @@
 | `outlook_rust_status` | none | — | Static implementation flags; `outlook_connected:false` is **not** an actual connection test |
 | `outlook_whoami` | none | — | Outlook current user display name |
 | `outlook_list_folders` | `root?`, `max_depth?` | depth 2 / max 4; max 100 folders | Default mailbox root, not a general delegated-store explorer |
-| `outlook_list_mails` | `folder?`, `limit?`, `offset?`, `unread_only?`, `from_address?`, `backend?` | limit 10 / max 30; offset 0..1000 | Metadata-only, includes actual backend; `since` and `until` are **not implemented** and return errors |
+| `outlook_list_mails` | `folder?`, `limit?`, `offset?`, `unread_only?`, `from_address?`, `since?`, `until?`, `backend?` | limit 10 / max 30; offset 0..1000 | Metadata-only, includes actual backend; `since`/`until` are inclusive local wall-clock bounds on received time (`YYYY-MM-DD[THH:MM[:SS]]`; `Z` and offsets are rejected). Unit-tested only, not yet run against live Outlook |
 | `outlook_search_mails` | `query`, `folder?`, `scope?`, `limit?`, `backend?`, `search_subfolders?` | query length 1..160; limit 10 / max 30; scope `subject_body`; backend `auto` | Backend: `auto`, `table`, `legacy`, `indexed`; only indexed accepts `search_subfolders` |
 | `outlook_get_mail` | `entry_id`, `store_id?`, `include_body?`, `include_html?`, `max_body_chars?` | body on; 4,000 chars default / 12,000 max | Selected plain-text message; HTML bodies disabled |
 | `outlook_list_contacts` | `limit?`, `offset?` | limit 50 / max 200 (matches Python); offset 0..5000 | Contact folders in every store, default store first; 15 s budget and 5,000-item scan cap, `scan_truncated` reports a partial scan. `entry_id` is a short handle |

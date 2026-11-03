@@ -22,10 +22,10 @@ use contracts::{
     CreateTaskParams, DeleteItemParams, FolderParams, ForwardMailParams, GetContactParams,
     GetEventParams, GetMailParams, ListContactsParams, ListEventsParams, ListMailsParams,
     ListTasksParams, MailCommand, MarkMailParams, MoveMailParams, ReplyMailParams,
-    ResolveNameParams, SearchContactsParams, SearchMailsParams, SendDraftParams, SendMailParams,
-    SetCategoryParams, ThreadParams, ToggleRuleParams, UpdateEventParams, checked_send_id,
-    prepare_delete, prepare_forward_mail, prepare_reply_mail, prepare_send_mail,
-    prepare_toggle_rule,
+    ResolveNameParams, RespondEventParams, SearchContactsParams, SearchMailsParams,
+    SendDraftParams, SendMailParams, SetCategoryParams, ThreadParams, ToggleRuleParams,
+    UpdateEventParams, checked_send_id, prepare_delete, prepare_forward_mail, prepare_reply_mail,
+    prepare_respond_event, prepare_send_mail, prepare_toggle_rule,
 };
 use outlook::OutlookBridge;
 use policy::{Capability, Policy};
@@ -345,7 +345,7 @@ impl OutlookMcp {
 
     /// Permission for this kind of action, then the approval-gated engine.
     async fn confirmed(&self, peer: Peer<RoleServer>, target: ActionTarget) -> CallToolResult {
-        if let Err(error) = self.policy.check(target.kind.capability()) {
+        if let Err(error) = self.policy.check(target.capability()) {
             return text_error(error);
         }
         outcome_result(self.action_engine(peer).run(target).await)
@@ -833,7 +833,27 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "After a delete or rule change reported unknown_outcome (or to confirm one), look for the item by its action_id: done, not_done or unknown. Read-only. Never try a delete again before checking.",
+        description = "Answer a meeting invitation you received (accept, tentative or decline), only after the user approves a prompt showing the meeting, organizer, your current and new answer and whether a reply is emailed. By default the answer is emailed to the organizer (requires send permission); with send_response=false only your own calendar changes (requires events permission). Accepting or tentatively accepting replaces your calendar item with a new one and declining removes it, so use the handle only from a fresh list_events. Refused for meetings you organized, cancelled meetings and non-meetings. Nothing happens if the client cannot show the prompt. Check `done` in the result.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn outlook_respond_event(
+        &self,
+        peer: Peer<RoleServer>,
+        Parameters(params): Parameters<RespondEventParams>,
+    ) -> CallToolResult {
+        match prepare_respond_event(&params) {
+            Ok(target) => self.confirmed(peer, target).await,
+            Err(error) => text_error(error),
+        }
+    }
+
+    #[tool(
+        description = "After a delete, rule change or meeting answer reported unknown_outcome (or to confirm one), look for the item by its action_id: done, not_done or unknown. Read-only. Never try a delete again before checking.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -952,7 +972,7 @@ mod tests {
     fn registered_tools_exclude_not_yet_implemented_writes() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 34);
+        assert_eq!(tools.len(), 35);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -988,11 +1008,11 @@ mod tests {
             "outlook_delete_event",
             "outlook_check_action",
             "outlook_toggle_rule",
+            "outlook_respond_event",
         ] {
             assert!(names.contains(&expected));
         }
-        for forbidden in ["outlook_respond_event", "outlook_save_attachments"] {
-            assert!(!names.contains(&forbidden));
-        }
+        // Not implemented yet.
+        assert!(!names.contains(&"outlook_save_attachments"));
     }
 }

@@ -36,7 +36,7 @@ fn item_by_id(namespace: &IDispatch, target: &ActionTarget) -> Result<IDispatch>
         .context("Item no longer available; EntryID may be stale")
 }
 
-fn stamp_of(item: &IDispatch) -> Option<String> {
+pub(super) fn stamp_of(item: &IDispatch) -> Option<String> {
     let props = win::object_property(item, "UserProperties").ok()?;
     let prop = win::method_object(&props, "Find", vec![VARIANT::from(STAMP)]).ok()?;
     win::string_property(&prop, "Value").ok()
@@ -44,7 +44,7 @@ fn stamp_of(item: &IDispatch) -> Option<String> {
 
 /// True when `item` is in Deleted Items or any folder below it. Unknown
 /// counts as "yes": when in doubt, do not delete.
-fn in_deleted_items(namespace: &IDispatch, item: &IDispatch) -> bool {
+pub(super) fn in_deleted_items(namespace: &IDispatch, item: &IDispatch) -> bool {
     let Ok(deleted) = default_folder(namespace, OL_FOLDER_DELETED) else {
         return true;
     };
@@ -75,7 +75,7 @@ fn check_kind(item: &IDispatch, kind: ActionKind) -> Result<()> {
         ActionKind::DeleteEvent if class == 26 => Ok(()),
         ActionKind::DeleteMail => bail!("that EntryID does not identify a mail item"),
         ActionKind::DeleteEvent => bail!("that EntryID does not identify a calendar event"),
-        ActionKind::ToggleRule => bail!("not an item action"),
+        ActionKind::ToggleRule | ActionKind::RespondEvent => bail!("not an item to delete"),
     }
 }
 
@@ -153,7 +153,9 @@ fn facts_of(item: &IDispatch, kind: ActionKind) -> (String, Vec<Fact>, Vec<Strin
             )
         }
         // Rule changes are handled in rule.rs and never reach this function.
-        ActionKind::ToggleRule => (String::new(), vec![], vec![], String::new()),
+        ActionKind::ToggleRule | ActionKind::RespondEvent => {
+            (String::new(), vec![], vec![], String::new())
+        }
     }
 }
 

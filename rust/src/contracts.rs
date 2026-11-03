@@ -401,7 +401,7 @@ pub struct CreateEventParams {
     pub end: String,
     pub location: Option<String>,
     pub body: Option<String>,
-    /// Inviting attendees is not supported yet; must be empty or omitted.
+    /// Plain email addresses to invite. Non-empty makes this a meeting that needs approval (send permission).
     pub attendees: Option<Vec<String>>,
     /// Online meetings are not supported yet; must be false or omitted.
     pub is_online_meeting: Option<bool>,
@@ -569,6 +569,82 @@ pub fn prepare_respond_event(x: &RespondEventParams) -> Result<ActionTarget, Str
         store_id: x.store_id.clone(),
         enabled: Some(x.send_response.unwrap_or(true)),
         response: Some(response),
+        payload: None,
+    })
+}
+
+const MAX_INVITEES: usize = 100;
+
+/// Plain SMTP addresses only: names are ambiguous and would resolve differently
+/// at approval time than at send time.
+fn checked_attendees(list: &[String]) -> Result<Vec<String>, String> {
+    if list.is_empty() || list.len() > MAX_INVITEES {
+        return Err(format!("attendees must list 1..{MAX_INVITEES} addresses"));
+    }
+    let mut seen = Vec::new();
+    for raw in list {
+        let address = raw.trim().to_ascii_lowercase();
+        let valid = address.len() <= 254
+            && address.matches('@').count() == 1
+            && !address.starts_with('@')
+            && !address.ends_with('@')
+            && !address
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control() || c == ';' || c == ',');
+        if !valid {
+            return Err(format!("'{raw}' is not a plain email address"));
+        }
+        if !seen.contains(&address) {
+            seen.push(address);
+        }
+    }
+    Ok(seen)
+}
+
+pub fn prepare_invite_meeting(x: &CreateEventParams) -> Result<ActionTarget, String> {
+    let attendees = checked_attendees(x.attendees.as_deref().unwrap_or(&[]))?;
+    let mut plain = x.clone();
+    plain.attendees = None;
+    validate_create_event(&plain)?;
+    if x.recurrence.is_some() {
+        return Err("recurring meetings with attendees are not supported yet".into());
+    }
+    let (start, end) = (parsed(&x.start, "start")?, parsed(&x.end, "end")?);
+    let payload = serde_json::json!({
+        "subject": x.subject, "start": x.start, "end": x.end,
+        "location": x.location, "body": x.body, "attendees": attendees,
+        "reminder_minutes": x.reminder_minutes.unwrap_or(15),
+    });
+    Ok(ActionTarget {
+        kind: ActionKind::InviteMeeting,
+        // Identifies the request, so an identical retry after an unknown outcome is blocked.
+        entry_id: format!(
+            "invite|{}|{}|{}|{}",
+            x.subject.trim(),
+            start.minutes(),
+            end.minutes(),
+            attendees.join(",")
+        ),
+        store_id: None,
+        enabled: None,
+        response: None,
+        payload: Some(payload),
+    })
+}
+
+pub fn prepare_update_meeting(x: &UpdateEventParams) -> Result<ActionTarget, String> {
+    validate_update_event(x)?;
+    let payload = serde_json::json!({
+        "subject": x.subject, "start": x.start, "end": x.end,
+        "location": x.location, "body": x.body,
+    });
+    Ok(ActionTarget {
+        kind: ActionKind::UpdateMeeting,
+        entry_id: x.entry_id.clone(),
+        store_id: x.store_id.clone(),
+        enabled: None,
+        response: None,
+        payload: Some(payload),
     })
 }
 
@@ -584,6 +660,7 @@ pub fn prepare_delete(x: &DeleteItemParams, kind: ActionKind) -> Result<ActionTa
         store_id: x.store_id.clone(),
         enabled: None,
         response: None,
+        payload: None,
     })
 }
 
@@ -609,6 +686,7 @@ pub fn prepare_toggle_rule(x: &ToggleRuleParams) -> Result<ActionTarget, String>
         store_id: None,
         enabled: Some(x.enabled),
         response: None,
+        payload: None,
     })
 }
 
@@ -1520,6 +1598,52 @@ mod tests {
         };
         assert!(long_body(50_000).is_ok());
         assert!(long_body(50_001).is_err());
+    }
+
+    #[test]
+    fn invitations_need_plain_addresses_and_no_recurrence() {
+        let base = || CreateEventParams {
+            subject: "Sync".into(),
+            start: "2030-02-01T10:00:00".into(),
+            end: "2030-02-01T10:30:00".into(),
+            location: None,
+            body: None,
+            attendees: Some(vec!["A@B.example".into(), "a@b.example".into()]),
+            is_online_meeting: None,
+            reminder_minutes: None,
+            recurrence: None,
+        };
+        let target = prepare_invite_meeting(&base()).unwrap();
+        assert_eq!(target.kind, ActionKind::InviteMeeting);
+        assert_eq!(
+            target.payload.unwrap()["attendees"],
+            serde_json::json!(["a@b.example"])
+        );
+        for bad in [
+            "Bob",
+            "a@b@c",
+            "a b@c.example",
+            "x@y.example;z@y.example",
+            "@x",
+        ] {
+            let mut x = base();
+            x.attendees = Some(vec![bad.into()]);
+            assert!(prepare_invite_meeting(&x).is_err(), "{bad}");
+        }
+        let mut x = base();
+        x.attendees = Some(vec![]);
+        assert!(prepare_invite_meeting(&x).is_err());
+        let mut x = base();
+        x.is_online_meeting = Some(true);
+        assert!(prepare_invite_meeting(&x).is_err());
+        let mut x = base();
+        x.recurrence = Some(RecurrenceParams {
+            kind: "daily".into(),
+            interval: None,
+            occurrences: None,
+            end_date: None,
+        });
+        assert!(prepare_invite_meeting(&x).is_err());
     }
 
     #[test]

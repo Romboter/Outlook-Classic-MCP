@@ -184,7 +184,7 @@ pub(super) fn update_event(namespace: &IDispatch, params: UpdateEventParams) -> 
     // Saving a change to a meeting would notify its attendees.
     if win::int_property(&event, "MeetingStatus").unwrap_or(OL_NON_MEETING) != OL_NON_MEETING {
         bail!(
-            "this event is a meeting with attendees; changing it would notify them, which is not supported yet"
+            "this event is a meeting with attendees; use outlook_update_meeting, which tells them"
         );
     }
     let start = params.start.as_deref().map(resolve_bound).transpose()?;

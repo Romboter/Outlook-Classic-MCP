@@ -75,7 +75,11 @@ fn check_kind(item: &IDispatch, kind: ActionKind) -> Result<()> {
         ActionKind::DeleteEvent if class == 26 => Ok(()),
         ActionKind::DeleteMail => bail!("that EntryID does not identify a mail item"),
         ActionKind::DeleteEvent => bail!("that EntryID does not identify a calendar event"),
-        ActionKind::ToggleRule | ActionKind::RespondEvent | ActionKind::CancelMeeting => {
+        ActionKind::ToggleRule
+        | ActionKind::RespondEvent
+        | ActionKind::CancelMeeting
+        | ActionKind::InviteMeeting
+        | ActionKind::UpdateMeeting => {
             bail!("not an item to delete")
         }
     }
@@ -155,9 +159,11 @@ fn facts_of(item: &IDispatch, kind: ActionKind) -> (String, Vec<Fact>, Vec<Strin
             )
         }
         // Rule changes are handled in rule.rs and never reach this function.
-        ActionKind::ToggleRule | ActionKind::RespondEvent | ActionKind::CancelMeeting => {
-            (String::new(), vec![], vec![], String::new())
-        }
+        ActionKind::ToggleRule
+        | ActionKind::RespondEvent
+        | ActionKind::CancelMeeting
+        | ActionKind::InviteMeeting
+        | ActionKind::UpdateMeeting => (String::new(), vec![], vec![], String::new()),
     }
 }
 

@@ -60,6 +60,19 @@ fn check_allowed(namespace: &IDispatch, item: &IDispatch) -> Result<()> {
     }
 }
 
+/// Readable address: Exchange recipients carry an internal `/o=...` address,
+/// so ask the address entry for the SMTP one and show nothing rather than the DN.
+fn smtp_address(recipient: &IDispatch) -> String {
+    let plain = optional_text(recipient, "Address");
+    if !plain.starts_with('/') {
+        return plain;
+    }
+    win::object_property(recipient, "AddressEntry")
+        .and_then(|entry| win::method_object(&entry, "GetExchangeUser", vec![]))
+        .map(|user| optional_text(&user, "PrimarySmtpAddress"))
+        .unwrap_or_default()
+}
+
 /// `(count, "Name <address>" for the first MAX_LISTED)`.
 fn attendees(item: &IDispatch) -> (i32, Vec<String>) {
     let Ok(recipients) = win::object_property(item, "Recipients") else {
@@ -68,13 +81,7 @@ fn attendees(item: &IDispatch) -> (i32, Vec<String>) {
     let count = win::int_property(&recipients, "Count").unwrap_or(0).max(0);
     let listed = (1..=count.min(MAX_LISTED))
         .filter_map(|i| win::method_object(&recipients, "Item", vec![VARIANT::from(i)]).ok())
-        .map(|r| {
-            format!(
-                "{} <{}>",
-                optional_text(&r, "Name"),
-                optional_text(&r, "Address")
-            )
-        })
+        .map(|r| format!("{} <{}>", optional_text(&r, "Name"), smtp_address(&r)))
         .collect();
     (count, listed)
 }

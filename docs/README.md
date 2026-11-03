@@ -17,6 +17,7 @@ This fork contains two implementations: the **existing Python Outlook Classic MC
 | Protect company mailbox data | [Security and privacy](SECURITY.md) |
 | Review the proposed send/reply/forward design (not implemented) | [Send workflow design](SEND-DESIGN.md) |
 | Review the proposed delete/respond/invite/rules/attachments design (not implemented) | [Confirmed actions design](CONFIRMED-ACTIONS-DESIGN.md) |
+| Review the proposed native-dialog approval for clients without elicitation (not implemented) | [Dialog approval design](DIALOG-APPROVAL-DESIGN.md) |
 | Check outstanding work and release gates | [Project status](STATUS.md) |
 | Perform a task step by step | [Runbook index](runbooks/README.md) |
 

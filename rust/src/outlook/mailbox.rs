@@ -53,18 +53,63 @@ pub(super) fn default_folder(namespace: &IDispatch, number: i32) -> Result<IDisp
     win::method_object(namespace, "GetDefaultFolder", vec![VARIANT::from(number)])
 }
 
-pub(super) fn folder_path(namespace: &IDispatch, path: Option<&str>) -> Result<IDispatch> {
-    let path = path.unwrap_or("inbox").trim();
-    let key = path.to_lowercase();
-    let kind = match key.as_str() {
+/// Well-known folder names (default store) to `OlDefaultFolders` numbers.
+fn default_folder_kind(path: &str) -> Option<i32> {
+    match path.trim().to_lowercase().as_str() {
         "" | "inbox" => Some(6),
         "sent" | "sent items" => Some(5),
         "drafts" => Some(16),
-        "deleted" | "deleted items" => Some(3),
+        "deleted" | "deleted items" | "trash" => Some(3),
         "outbox" => Some(4),
+        "junk" | "spam" | "junk email" | "junk e-mail" => Some(23),
+        "calendar" => Some(9),
+        "contacts" => Some(10),
+        "tasks" => Some(13),
+        "notes" => Some(12),
         _ => None,
-    };
-    if let Some(kind) = kind {
+    }
+}
+
+/// Root folder of the store whose display name equals `name` (any store, case-insensitive).
+fn store_root(namespace: &IDispatch, name: &str) -> Option<IDispatch> {
+    let roots = win::object_property(namespace, "Folders").ok()?;
+    let count = win::property(&roots, "Count")
+        .ok()
+        .and_then(|v| i32::try_from(&v).ok())?;
+    (1..=count.min(50)).find_map(|i| {
+        let root = win::method_object(&roots, "Item", vec![VARIANT::from(i)]).ok()?;
+        optional_text(&root, "Name")
+            .eq_ignore_ascii_case(name)
+            .then_some(root)
+    })
+}
+
+fn walk_from_store(root: IDispatch, rest: &[&str]) -> Result<IDispatch> {
+    let mut current = root.clone();
+    for (i, part) in rest.iter().enumerate() {
+        if part.len() > 120 || *part == ".." || *part == "." {
+            bail!("invalid folder segment");
+        }
+        // "Store/Inbox" and friends: the store's own default folder.
+        if i == 0
+            && let Some(kind) = default_folder_kind(part).filter(|_| !part.is_empty())
+            && let Ok(store) = win::object_property(&root, "Store")
+            && let Ok(folder) =
+                win::method_object(&store, "GetDefaultFolder", vec![VARIANT::from(kind)])
+        {
+            current = folder;
+            continue;
+        }
+        let folders = win::object_property(&current, "Folders")?;
+        current = win::method_object(&folders, "Item", vec![VARIANT::from(*part)])
+            .with_context(|| format!("folder segment not found: {part}"))?;
+    }
+    Ok(current)
+}
+
+pub(super) fn folder_path(namespace: &IDispatch, path: Option<&str>) -> Result<IDispatch> {
+    let path = path.unwrap_or("inbox").trim();
+    if let Some(kind) = default_folder_kind(path) {
         return default_folder(namespace, kind);
     }
 
@@ -76,6 +121,13 @@ pub(super) fn folder_path(namespace: &IDispatch, path: Option<&str>) -> Result<I
         .collect();
     if segments.len() > 8 {
         bail!("folder path is too deep");
+    }
+    // A leading segment naming another store (archive, PST, shared mailbox)
+    // starts the walk at that store's root.
+    if let Some((first, rest)) = segments.split_first()
+        && let Some(root) = store_root(namespace, first)
+    {
+        return walk_from_store(root, rest);
     }
     let mut current = if segments
         .first()
@@ -787,5 +839,20 @@ impl win::Session {
         }?;
         self.refs.compact_response(&mut response);
         Ok(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_folder_kind;
+
+    #[test]
+    fn folder_aliases_map_to_default_folders() {
+        assert_eq!(default_folder_kind(" Trash "), Some(3));
+        assert_eq!(default_folder_kind("Spam"), Some(23));
+        assert_eq!(default_folder_kind("junk email"), Some(23));
+        assert_eq!(default_folder_kind("Calendar"), Some(9));
+        assert_eq!(default_folder_kind(""), Some(6));
+        assert_eq!(default_folder_kind("Inbox/Projects"), None);
     }
 }

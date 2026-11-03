@@ -14,7 +14,7 @@ Severity: **blocks** = blocks real daily use; **nice** = nice to have; **deliber
 | 2 | G02 | Mail timestamps were `received_local` locale text. **Fixed in PR #43**: `received` is now ISO-8601 local time with offset (threads: `sent` and `received`); live read-only check passed. | done |
 | 3 | G03 | Multi-word search was a contiguous phrase match. **Fixed** on the table and legacy backends: all words, any order (live read-only check: reversed-order query found 15 of 15 subject hits where the old build found 0). The opt-in `indexed` backend still matches the whole phrase. | done |
 | 4 | G06 | `from_address` was empty for Exchange (X.500 `/O=`) senders. **Fixed in PR #43**: SMTP comes from PR_SENDER_SMTP_ADDRESS (blank 2/30 before, 0/30 after in a live read-only check). | done |
-| 5 | G05 | `outlook_get_mail` omits the attachments list (index, filename, size), `flagged`, `importance`, `categories`, `conversation_id`, `sent`, `bcc`. The model cannot pick an `attachment_index` for `save_attachments`. | S |
+| 5 | G05 | `outlook_get_mail` omitted the attachments list, `flagged`, `importance`, `categories`, `conversation_id`, `sent` and `bcc`. **Fixed**: all now returned, same shapes as Python (live read-only check: 30 of 30 mails, 51 attachments, shapes ok; `flagged=true` not seen in the sample). | done |
 | 6 | G04 | List and search rows omit `to`, `flagged`, `has_attachments`, `importance`, `preview`. Triage needs one `get_mail` per row, which costs more tokens. | M |
 | 7 | G11 | Folder specs: no `junk`/`spam`/`trash` aliases and no store-name prefix, so archive, PST or shared stores cannot be addressed. Default mailbox only. | M |
 | 8 | G10 | No way to read past the 12,000-char body ceiling (no offset or continuation). Long threads and newsletters are cut with no recourse. | S |
@@ -45,7 +45,7 @@ Counts: 31 true gaps (30 actionable plus G30, information only; IDs are stable a
 
 | ID | Tool | Gap | Python behavior | Rust location | Severity | Size |
 | --- | --- | --- | --- | --- | --- | --- |
-| G05 | get_mail | Missing: `attachments[] {index, filename, size_bytes}`, `conversation_id`, `bcc`, `sent`, `flagged`, `importance`, `categories`. Present: summary fields plus `to`, `cc`, `body`, `body_truncated`, `body_total_chars`. | client/mail.py:78-123 | mailbox.rs:379-411 | blocks | S |
+| G05 | get_mail | **FIXED.** Was missing: `attachments[] {index, filename, size_bytes}`, `conversation_id`, `bcc`, `sent`, `flagged`, `importance`, `categories`. Present: summary fields plus `to`, `cc`, `body`, `body_truncated`, `body_total_chars`. | client/mail.py:78-123 | mailbox.rs:379-411 | blocks | S |
 | G09 | get_mail | `include_html=true` is rejected ("disabled in this read-only prototype"). Python returned `html_body`, opt-in. | client/mail.py:117-121, tools/mail.py:121-131 | contracts.rs:1046-1048, contracts.rs:55-66 | nice | M (needs a safety review) |
 | G10 | get_mail | Rust body ceiling is 12,000 chars and `max_body_chars=0` (unlimited) is not offered. There is no offset or "next chunk" parameter, so the remainder is unreachable. `get_thread` is capped at 6,000 per message. | client/mail.py:104-111 (`0` means no limit, default 10000) | contracts.rs:1049-1051, mailbox.rs:392-404 | nice | S |
 

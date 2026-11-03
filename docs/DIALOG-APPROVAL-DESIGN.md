@@ -1,6 +1,6 @@
 # Native dialog approval design (issues #8 and #9)
 
-**Status: proposal, not implemented, not approved.** Nothing here has been built or run. The decisions at the end need the owner's answer before code is written.
+**Status: decisions approved by the owner (below). Implemented in a draft PR stacked on the spike: `OUTLOOK_MCP_APPROVAL` (default `dialog`), `approval.rs`, `dialog.rs` (TaskDialogIndirect, manifest via `build.rs`). Verified: unit tests for backend choice and prompt splitting, a timeout run and a manual Approve/Decline run of the spike example. NOT verified: the window opened by a client-launched server (foreground), a real tool call approved through it, DPI, keyboard-only use.**
 
 ## Why
 

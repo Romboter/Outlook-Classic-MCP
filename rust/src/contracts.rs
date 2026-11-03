@@ -1,6 +1,7 @@
 //! Read-only MCP request contracts. Values are validated again on the server
 //! side; JSON Schema is a usability hint, not an authorization boundary.
 use crate::localtime::LocalTime;
+use crate::policy::Capability;
 use rmcp::schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -182,6 +183,31 @@ fn checked_text(value: &str, what: &str) -> Result<(), String> {
 }
 
 /// Limit check for tools whose Python defaults are larger than the mail tools'.
+impl MailCommand {
+    /// What the command needs permission to do. The match is exhaustive on
+    /// purpose: a new command cannot compile until it is classified.
+    pub fn capability(&self) -> Capability {
+        match self {
+            MailCommand::WhoAmI
+            | MailCommand::ListEvents(_)
+            | MailCommand::GetEvent(_)
+            | MailCommand::ListTasks(_)
+            | MailCommand::ListContacts(_)
+            | MailCommand::SearchContacts(_)
+            | MailCommand::GetContact(_)
+            | MailCommand::ResolveName(_)
+            | MailCommand::ListCategories
+            | MailCommand::ListRules
+            | MailCommand::GetOutOfOffice
+            | MailCommand::ListFolders(_)
+            | MailCommand::ListMails(_)
+            | MailCommand::SearchMails(_)
+            | MailCommand::GetMail(_)
+            | MailCommand::GetThread(_) => Capability::Read,
+        }
+    }
+}
+
 pub fn checked_limit_in(input: Option<u32>, default: u32, max: u32) -> Result<usize, String> {
     let n = input.unwrap_or(default);
     if !(1..=max).contains(&n) {
@@ -403,6 +429,17 @@ mod tests {
         let mut empty = params;
         empty.entry_id.clear();
         assert!(validate_command(&MailCommand::GetThread(empty)).is_err());
+    }
+
+    #[test]
+    fn every_current_command_is_a_read() {
+        let commands = [
+            MailCommand::WhoAmI,
+            MailCommand::ListCategories,
+            MailCommand::ListRules,
+            MailCommand::GetOutOfOffice,
+        ];
+        assert!(commands.iter().all(|c| c.capability() == Capability::Read));
     }
 
     #[test]

@@ -3,6 +3,7 @@
 //! This is intentionally separate from the MCP tools until issue #4. No mail
 //! mutation operations or live mailbox tools are exposed by this module.
 use crate::contracts::{MailCommand, validate_command};
+use crate::ticket::{Ticket, TimeoutVerdict, UNKNOWN_OUTCOME, timeout_verdict};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 #[cfg(windows)]
@@ -28,7 +29,10 @@ mod table;
 mod thread;
 use serde::Serialize;
 use std::{
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, Sender},
+    },
     thread as std_thread,
     time::Duration,
 };
@@ -51,6 +55,8 @@ enum Request {
     Call {
         command: MailCommand,
         response: Sender<Result<Value, String>>,
+        /// Lets the caller cancel a request that has not started.
+        ticket: Arc<Ticket>,
     },
     Shutdown,
 }
@@ -104,20 +110,51 @@ impl OutlookBridge {
 impl OutlookBridge {
     pub fn execute(&self, command: MailCommand) -> Result<Value> {
         validate_command(&command).map_err(anyhow::Error::msg)?;
+        let idempotent = command.capability().idempotent();
+        let ticket = Arc::new(Ticket::new());
         let (tx, rx) = mpsc::channel();
         self.sender
             .send(Request::Call {
                 command,
                 response: tx,
+                ticket: Arc::clone(&ticket),
             })
             .context("Outlook COM worker has exited")?;
         match rx.recv_timeout(Duration::from_secs(45)) {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(error)) => bail!("{error}"),
-            Err(mpsc::RecvTimeoutError::Timeout) => bail!(
-                "Read-only Outlook request timed out; Outlook may be showing a dialog. Request may finish later."
-            ),
-            Err(mpsc::RecvTimeoutError::Disconnected) => bail!("Outlook COM worker disconnected"),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                match timeout_verdict(ticket.cancel(), idempotent) {
+                    TimeoutVerdict::NotExecuted => bail!(
+                        "Outlook request timed out while queued and was cancelled; it was not executed."
+                    ),
+                    TimeoutVerdict::ReadStillRunning => bail!(
+                        "Read-only Outlook request timed out; Outlook may be showing a dialog. Request may finish later."
+                    ),
+                    TimeoutVerdict::UnknownOutcome => bail!(
+                        "{UNKNOWN_OUTCOME}the request timed out while Outlook was running it; Outlook may be showing a dialog"
+                    ),
+                    // The result raced the timeout; give it a moment to arrive.
+                    TimeoutVerdict::Completed => {
+                        match rx.recv_timeout(Duration::from_millis(500)) {
+                            Ok(Ok(value)) => Ok(value),
+                            Ok(Err(error)) => bail!("{error}"),
+                            Err(_) if idempotent => {
+                                bail!("Outlook result was lost; repeat the read")
+                            }
+                            Err(_) => bail!(
+                                "{UNKNOWN_OUTCOME}the operation finished but its result was lost"
+                            ),
+                        }
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) if idempotent => {
+                bail!("Outlook COM worker disconnected")
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                bail!("{UNKNOWN_OUTCOME}the Outlook COM worker stopped while handling the request")
+            }
         }
     }
 }
@@ -148,7 +185,18 @@ fn run_worker(receiver: Receiver<Request>) {
 
         match command {
             Request::Shutdown => break,
-            Request::Call { command, response } => {
+            Request::Call {
+                command,
+                response,
+                ticket,
+            } => {
+                // The caller may have given up while this was queued.
+                if !ticket.start() {
+                    let _ = response.send(Err(
+                        "request was cancelled before it started; it was not executed".into(),
+                    ));
+                    continue;
+                }
                 let result = match &initialization {
                     Ok(_) => {
                         if session.is_none() {
@@ -157,6 +205,17 @@ fn run_worker(receiver: Receiver<Request>) {
                         match &mut session {
                             Some(existing) => match existing.execute(command.clone()) {
                                 Ok(value) => Ok(value),
+                                // A lost connection mid-write may have taken effect:
+                                // report it, never replay it.
+                                Err(error)
+                                    if win::is_disconnect(&error)
+                                        && !command.capability().idempotent() =>
+                                {
+                                    session = None;
+                                    Err(anyhow::anyhow!(
+                                        "{UNKNOWN_OUTCOME}the COM connection was lost while the operation was running"
+                                    ))
+                                }
                                 Err(error) if win::is_disconnect(&error) => {
                                     session = None;
                                     match win::Session::attach() {
@@ -177,6 +236,7 @@ fn run_worker(receiver: Receiver<Request>) {
                     }
                     Err(error) => Err(anyhow::anyhow!("{error}")),
                 };
+                ticket.finish();
                 let _ = response.send(result.map_err(|error| format!("{error:#}")));
             }
             Request::Probe {

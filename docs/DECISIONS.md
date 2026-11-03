@@ -17,7 +17,7 @@ These are the decisions embodied in current code, not a claim that every design 
 | Never replay a non-idempotent request | A lost connection mid-send may have taken effect | Only reads are retried after a COM disconnect; anything else reports `unknown_outcome` |
 | Per-request ticket | A caller that timed out must not have a queued write run later | Queued requests are cancelled and report "not executed"; running ones report `unknown_outcome` |
 | Conservative quoted-history trimming | Reduce duplicate conversation text without inventing summaries | Expose omissions and raw message recovery; compare with originals |
-| Keep dates as locale strings initially | Typed UTC conversion requires live provider testing | Never label `received_local` as UTC |
+| Mail dates are ISO-8601 local time with offset (was locale strings) | Typed `VT_DATE` conversion, already used for events and tasks, checked live on 2026-11-03 | Key is `received`; never present it as UTC |
 | Branch+draft PR for every change | Reviewable, reversible work | No direct `main` writes or merges without owner approval |
 
 ## Risks still open

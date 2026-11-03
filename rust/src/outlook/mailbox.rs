@@ -16,7 +16,7 @@ use std::time::Instant;
 use windows::{
     Win32::System::{
         Com::{DISPATCH_METHOD, IDispatch},
-        Variant::{VAR_CHANGE_FLAGS, VARIANT, VT_BSTR, VariantChangeType},
+        Variant::VARIANT,
     },
     core::BSTR,
 };
@@ -25,24 +25,20 @@ pub(super) fn optional_text(object: &IDispatch, name: &str) -> String {
     win::string_property(object, name).unwrap_or_default()
 }
 
-fn text_property(object: &IDispatch, name: &str) -> String {
-    // Outlook DATE properties come back as VT_DATE rather than VT_BSTR.
-    // Coercion uses the current Windows locale. We label dates as local text,
-    // not ISO-8601, until typed conversion has been tested on real Outlook.
-    let Ok(value) = win::property(object, name) else {
-        return String::new();
-    };
-    if let Ok(text) = BSTR::try_from(&value) {
-        return text.to_string();
-    }
-    let mut converted = VARIANT::default();
-    let result = unsafe { VariantChangeType(&mut converted, &value, VAR_CHANGE_FLAGS(0), VT_BSTR) };
-    if result.is_err() {
-        return String::new();
-    }
-    BSTR::try_from(&converted)
-        .map(|s| s.to_string())
-        .unwrap_or_default()
+/// Sender address, as SMTP where Outlook can give one. Exchange-internal senders
+/// report an X.500 DN in `SenderEmailAddress`, so ask for PR_SENDER_SMTP_ADDRESS then.
+fn sender_address(item: &IDispatch) -> String {
+    let raw = optional_text(item, "SenderEmailAddress");
+    let smtp = raw
+        .starts_with('/')
+        .then(|| {
+            let accessor = win::object_property(item, "PropertyAccessor").ok()?;
+            let args = vec![VARIANT::from(table::SENDER_SMTP)];
+            let value = win::invoke(&accessor, "GetProperty", DISPATCH_METHOD, args).ok()?;
+            BSTR::try_from(&value).ok().map(|s| s.to_string())
+        })
+        .flatten();
+    table::public_address(&table::resolve_sender_address(&raw, smtp))
 }
 
 pub(super) fn bool_property(object: &IDispatch, name: &str) -> bool {
@@ -113,8 +109,8 @@ fn item_summary(item: &IDispatch, store_id: &str) -> Value {
         "store_id": store_id,
         "subject": optional_text(item, "Subject"),
         "from": optional_text(item, "SenderName"),
-        "from_address": table::public_address(&optional_text(item, "SenderEmailAddress")),
-        "received_local": text_property(item, "ReceivedTime"),
+        "from_address": sender_address(item),
+        "received": schedule::date_iso(item, "ReceivedTime"),
         "unread": bool_property(item, "UnRead")
     })
 }
@@ -150,7 +146,7 @@ fn collect_items(
             let sender = format!(
                 "{} {}",
                 optional_text(&item, "SenderName"),
-                optional_text(&item, "SenderEmailAddress")
+                sender_address(&item)
             )
             .to_lowercase();
             if !sender.contains(filter) {

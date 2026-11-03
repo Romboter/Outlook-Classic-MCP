@@ -68,7 +68,7 @@ If `backend: "table"` errors, record only the class of error and the Outlook bui
 - Outlook Table rows are a documented lightweight rowset, but performance depends on store provider, cache/indexing, query selectivity, and mailbox size.
 - `subject_body` intentionally stays on the legacy path until a correctly event-driven indexed search is implemented. Table body-content filters may be unsupported.
 - Some stores may not expose sender columns or the `PR_MESSAGE_FLAGS` field. `unread` may therefore be `null`, and the list tool may use its legacy fallback.
-- Times in responses remain `received_local` display strings; do not interpret them as UTC.
+- Times in responses are `received`, ISO-8601 local time with offset; the offset comes from the machine's time zone settings (DST across old dates is untested).
 - Existing handles are long Outlook EntryIDs. Compact server-side handles belong to issue #6.
 - The COM timeout protects the caller but does not cancel an in-progress Outlook call.
 - **No performance claims should be published until the same query has been run on real Outlook Classic.**

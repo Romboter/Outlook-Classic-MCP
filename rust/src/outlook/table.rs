@@ -74,6 +74,17 @@ pub fn public_address(address: &str) -> String {
     }
 }
 
+/// PR_SENDER_SMTP_ADDRESS: the SMTP address even when `SenderEmailAddress` is an X.500 DN.
+pub const SENDER_SMTP: &str = "http://schemas.microsoft.com/mapi/proptag/0x5D02001F";
+
+/// The SMTP address for an Exchange (X.500) sender when one was found, else the raw address.
+pub fn resolve_sender_address(raw: &str, smtp: Option<String>) -> String {
+    match smtp {
+        Some(smtp) if raw.starts_with('/') && smtp.contains('@') => smtp,
+        _ => raw.to_string(),
+    }
+}
+
 pub fn store_instant_search(folder: &IDispatch) -> Option<bool> {
     let store = win::object_property(folder, "Store").ok()?;
     let value = win::property(&store, "IsInstantSearchEnabled").ok()?;
@@ -130,6 +141,13 @@ pub fn enumerate_existing(
     {
         sender_address_available = true;
     }
+    let sender_smtp_available = win::invoke(
+        &columns,
+        "Add",
+        DISPATCH_METHOD,
+        vec![VARIANT::from(SENDER_SMTP)],
+    )
+    .is_ok();
     let flags_available = win::invoke(
         &columns,
         "Add",
@@ -199,7 +217,10 @@ pub fn enumerate_existing(
             String::new()
         };
         let sender_address = if sender_address_available {
-            text(&row, "SenderEmailAddress")
+            let raw = text(&row, "SenderEmailAddress");
+            let smtp =
+                (sender_smtp_available && raw.starts_with('/')).then(|| text(&row, SENDER_SMTP));
+            resolve_sender_address(&raw, smtp)
         } else {
             String::new()
         };
@@ -227,7 +248,7 @@ pub fn enumerate_existing(
             "subject": text(&row, "Subject"),
             "from": sender_name,
             "from_address": public_address(&sender_address),
-            "received_local": text(&row, "ReceivedTime"),
+            "received": cell(&row, "ReceivedTime").as_ref().and_then(super::schedule::variant_iso),
             "unread": unread_state
         }));
     }
@@ -247,6 +268,22 @@ mod tests {
     fn x500_addresses_are_withheld() {
         assert_eq!(public_address("/O=EXCHANGELABS/CN=X"), "");
         assert_eq!(public_address("a@b.com"), "a@b.com");
+    }
+    #[test]
+    fn exchange_senders_use_the_smtp_address_when_found() {
+        let dn = "/O=EXCHANGELABS/CN=X";
+        assert_eq!(
+            resolve_sender_address(dn, Some("a@b.com".into())),
+            "a@b.com"
+        );
+        // No SMTP, or a value that is not an address: keep the DN, which public_address withholds.
+        assert_eq!(resolve_sender_address(dn, None), dn);
+        assert_eq!(resolve_sender_address(dn, Some(String::new())), dn);
+        // Plain SMTP senders are never replaced.
+        assert_eq!(
+            resolve_sender_address("a@b.com", Some("c@d.com".into())),
+            "a@b.com"
+        );
     }
     #[test]
     fn table_scan_cap_is_bounded() {

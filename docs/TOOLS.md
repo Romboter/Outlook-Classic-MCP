@@ -61,7 +61,7 @@ Do not assume sample `m1` exists: use the handle returned in *your* current MCP 
 
 - `scope=subject_body` may select `Items.Restrict` in auto mode; `table` mode explicitly rejects body search.
 - `backend=indexed` is opt-in, requires an Outlook Instant Search-enabled store and event delivery; no performance claim yet.
-- Returned `received_local` dates are Windows-locale text and must not be treated as UTC.
+- Mail `received` (and `sent` in threads) are ISO-8601 local time with a UTC offset (`2026-11-03T13:03:54-05:00`), or `null` when unset. They replace the old `received_local` locale text, matching Python's `received`. `from_address` is the SMTP address; for Exchange-internal senders it comes from PR_SENDER_SMTP_ADDRESS, and is empty only if Outlook cannot supply one.
 - Returned `has_more` / `scan_truncated` are not proof all mailbox results have been checked.
 - No `outlook_send_mail`, delete, move, calendar writes, file saves, or similar Rust mutation tools are registered.
 

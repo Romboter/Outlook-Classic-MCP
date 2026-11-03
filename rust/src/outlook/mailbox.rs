@@ -548,11 +548,16 @@ fn get_mail(namespace: &IDispatch, params: GetMailParams) -> Result<Value> {
     if params.include_body.unwrap_or(true) {
         let body = optional_text(&item, "Body");
         let total_chars = body.chars().count();
+        let offset = params.body_offset.unwrap_or(0) as usize;
         object.insert(
             "body".into(),
-            json!(body.chars().take(limit).collect::<String>()),
+            json!(body.chars().skip(offset).take(limit).collect::<String>()),
         );
-        object.insert("body_truncated".into(), json!(total_chars > limit));
+        let end = offset.saturating_add(limit);
+        object.insert("body_truncated".into(), json!(total_chars > end));
+        if total_chars > end {
+            object.insert("body_next_offset".into(), json!(end));
+        }
         object.insert("body_total_chars".into(), json!(total_chars));
     }
     Ok(data)
@@ -571,6 +576,7 @@ impl win::Session {
             include_body: None,
             include_html: None,
             max_body_chars: None,
+            body_offset: None,
         };
         self.refs.resolve_input(&mut shim)?;
         Ok((shim.entry_id, shim.store_id))
@@ -794,6 +800,7 @@ impl win::Session {
                     include_body: None,
                     include_html: None,
                     max_body_chars: None,
+                    body_offset: None,
                 };
                 self.refs.resolve_input(&mut shim)?;
                 params.entry_id = shim.entry_id;
@@ -813,6 +820,7 @@ impl win::Session {
                     include_body: None,
                     include_html: None,
                     max_body_chars: None,
+                    body_offset: None,
                 };
                 self.refs.resolve_input(&mut shim)?;
                 params.entry_id = shim.entry_id;

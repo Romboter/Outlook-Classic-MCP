@@ -17,7 +17,7 @@ Severity: **blocks** = blocks real daily use; **nice** = nice to have; **deliber
 | 5 | G05 | `outlook_get_mail` omitted the attachments list, `flagged`, `importance`, `categories`, `conversation_id`, `sent` and `bcc`. **Fixed**: all now returned, same shapes as Python (live read-only check: 30 of 30 mails, 51 attachments, shapes ok; `flagged=true` not seen in the sample). | done |
 | 6 | G04 | List and search rows omitted `to`, `flagged`, `has_attachments`, `importance`, `preview`. **Fixed** on table and legacy paths (live read-only check: table and legacy agree 30 of 30 on `to`, `flagged`, `has_attachments`, `importance`; previews agree on the first 60 characters for 27 of 30). Rows are larger, so each result costs more tokens. | done |
 | 7 | G11 | **FIXED (live read-only check passed).** Was: folder specs: no `junk`/`spam`/`trash` aliases and no store-name prefix, so archive, PST or shared stores cannot be addressed. Default mailbox only. | M |
-| 8 | G10 | No way to read past the 12,000-char body ceiling (no offset or continuation). Long threads and newsletters are cut with no recourse. | S |
+| 8 | G10 | **FIXED (uncommitted; live read-only check 5 of 5 mails).** `get_mail` takes `body_offset`, result gives `body_next_offset`. Was: no way to read past the 12,000-char body ceiling (no offset or continuation). Long threads and newsletters are cut with no recourse. | S |
 | 9 | G22 | `outlook_list_folders` omits `unread_count` and `default_item_type`, and caps at 100 rows and depth 4. | S |
 | 10 | G25 | `outlook_whoami` returns only `current_user`: no accounts, `local_time`, `timezone`, `utc_offset`. | S |
 

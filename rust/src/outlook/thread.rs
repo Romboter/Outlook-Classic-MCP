@@ -163,6 +163,7 @@ impl win::Session {
             include_body: Some(false),
             include_html: Some(false),
             max_body_chars: None,
+            body_offset: None,
         };
         self.refs.resolve_input(&mut anchor)?;
         let selected = get_by_id(

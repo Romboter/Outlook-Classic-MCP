@@ -135,6 +135,7 @@ mod tests {
             include_body: Some(false),
             include_html: None,
             max_body_chars: None,
+            body_offset: None,
         }
     }
 

@@ -63,6 +63,9 @@ pub struct GetMailParams {
     pub include_html: Option<bool>,
     /// Plain-text body budget (default 4000, maximum 12000 characters).
     pub max_body_chars: Option<u32>,
+    /// Start the body at this character offset (default 0). Use the previous
+    /// result's `body_next_offset` to read a long body in pages.
+    pub body_offset: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

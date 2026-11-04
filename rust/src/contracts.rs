@@ -465,6 +465,25 @@ pub struct UpdateEventParams {
     pub body: Option<String>,
 }
 
+/// Parameters of `outlook_update_meeting`: the event fields plus attendee changes.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct UpdateMeetingParams {
+    /// Short handle from list_events, or a raw Outlook EntryID.
+    pub entry_id: String,
+    pub store_id: Option<String>,
+    pub subject: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub location: Option<String>,
+    pub body: Option<String>,
+    /// Must be true to change a recurring meeting (the change applies to every occurrence). Ignored for non-recurring meetings.
+    pub whole_series: Option<bool>,
+    /// Plain email addresses to invite to the meeting (max 100, no names). Each must not already be an attendee.
+    pub add_attendees: Option<Vec<String>>,
+    /// Plain email addresses to remove from the meeting (max 100, no names). Each must currently be an attendee; they are sent a cancellation. You cannot remove the organizer or every attendee.
+    pub remove_attendees: Option<Vec<String>>,
+}
+
 fn checked_free_text(value: &str, what: &str, max: usize) -> Result<(), String> {
     if value.chars().count() > max {
         return Err(format!("{what} must be at most {max} characters"));
@@ -695,22 +714,45 @@ fn checked_attendees(list: &[String]) -> Result<Vec<String>, String> {
     }
     let mut seen = Vec::new();
     for raw in list {
-        let address = raw.trim().to_ascii_lowercase();
-        let valid = address.len() <= 254
-            && address.matches('@').count() == 1
-            && !address.starts_with('@')
-            && !address.ends_with('@')
-            && !address
-                .chars()
-                .any(|c| c.is_whitespace() || c.is_control() || c == ';' || c == ',');
-        if !valid {
-            return Err(format!("'{raw}' is not a plain email address"));
-        }
+        let address = checked_address(raw)?;
         if !seen.contains(&address) {
             seen.push(address);
         }
     }
     Ok(seen)
+}
+
+fn checked_address(raw: &str) -> Result<String, String> {
+    let address = raw.trim().to_ascii_lowercase();
+    let valid = address.len() <= 254
+        && address.matches('@').count() == 1
+        && !address.starts_with('@')
+        && !address.ends_with('@')
+        && !address
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == ';' || c == ',');
+    if valid {
+        Ok(address)
+    } else {
+        Err(format!("'{raw}' is not a plain email address"))
+    }
+}
+
+/// An attendee change list: plain addresses, at most 100, no duplicates. Empty means none.
+fn checked_change_list(list: Option<&[String]>, what: &str) -> Result<Vec<String>, String> {
+    let list = list.unwrap_or(&[]);
+    if list.len() > MAX_INVITEES {
+        return Err(format!("{what} may list at most {MAX_INVITEES} addresses"));
+    }
+    let mut out: Vec<String> = Vec::new();
+    for raw in list {
+        let address = checked_address(raw)?;
+        if out.contains(&address) {
+            return Err(format!("{what} lists {address} more than once"));
+        }
+        out.push(address);
+    }
+    Ok(out)
 }
 
 /// 0 = Sunday .. 6 = Saturday.
@@ -779,6 +821,78 @@ pub fn describe_recurrence(r: &RecurrenceParams, start: &LocalTime) -> String {
     format!("repeats {pattern}, starting {}, {end}", start.iso())
 }
 
+/// Gate for updating a meeting by its Outlook `RecurrenceState`
+/// (0 none, 1 series master, 2 occurrence, 3 exception). A series needs the
+/// explicit `whole_series` acknowledgement; single occurrences are refused.
+pub fn series_gate(recurrence_state: i32, whole_series: bool) -> Result<(), String> {
+    match recurrence_state {
+        0 => Ok(()),
+        1 if whole_series => Ok(()),
+        1 => Err("this is a recurring meeting: the change and the update email apply to every occurrence. Pass whole_series=true to confirm that; nothing was changed".into()),
+        _ => Err("that handle is one occurrence of a recurring meeting; changing a single occurrence is not supported. Use the series itself (its master) with whole_series=true to change every occurrence".into()),
+    }
+}
+
+/// A recurrence read back from Outlook, in plain words for the approval prompt.
+/// `kind` is Outlook's RecurrenceType (0 daily, 1 weekly, 2 monthly,
+/// 3 monthly on the Nth weekday, 5 yearly, 6 yearly on the Nth weekday);
+/// `mask` is DaysOfWeekMask (Sunday 1 .. Saturday 64).
+pub fn describe_series(
+    kind: i32,
+    interval: i32,
+    mask: i32,
+    end: Option<&str>,
+    occurrences: i32,
+) -> String {
+    let n = interval.max(1);
+    let every = |unit: &str| {
+        if n == 1 {
+            format!("every {unit}")
+        } else {
+            format!("every {n} {unit}s")
+        }
+    };
+    let days: Vec<&str> = (0..7)
+        .filter(|d| mask & (1 << d) != 0)
+        .map(|d| WEEKDAYS[d])
+        .collect();
+    let on_days = if days.is_empty() {
+        String::new()
+    } else {
+        format!(" on {}", days.join(", "))
+    };
+    let pattern = match kind {
+        0 => every("day"),
+        1 => format!("{}{on_days}", every("week")),
+        2 => every("month"),
+        3 => format!("{}{on_days} (nth weekday of the month)", every("month")),
+        5 => every("year"),
+        6 => format!("{}{on_days} (nth weekday)", every("year")),
+        _ => "on a pattern this server cannot describe".into(),
+    };
+    let ends = match (end, occurrences) {
+        (_, o) if o > 0 => format!("{o} times"),
+        (Some(d), _) => format!("until {}", d.get(..10).unwrap_or(d)),
+        _ => "with no end date".into(),
+    };
+    format!("repeats {pattern}, {ends}")
+}
+
+/// Warning lines for the approval prompt when a whole series is changed.
+pub fn series_warnings(has_exceptions: bool) -> Vec<String> {
+    let mut lines = vec![
+        "This is a recurring series: the change and update email apply to every occurrence."
+            .to_string(),
+    ];
+    if has_exceptions {
+        lines.push(
+            "This series has individually changed occurrences; existing individual changes to occurrences may be reset by Outlook."
+                .into(),
+        );
+    }
+    lines
+}
+
 pub fn prepare_invite_meeting(x: &CreateEventParams) -> Result<ActionTarget, String> {
     if x.calendar.is_some() {
         return Err(
@@ -825,11 +939,32 @@ pub fn prepare_invite_meeting(x: &CreateEventParams) -> Result<ActionTarget, Str
     })
 }
 
-pub fn prepare_update_meeting(x: &UpdateEventParams) -> Result<ActionTarget, String> {
-    validate_update_event(x)?;
+pub fn prepare_update_meeting(x: &UpdateMeetingParams) -> Result<ActionTarget, String> {
+    let add = checked_change_list(x.add_attendees.as_deref(), "add_attendees")?;
+    let remove = checked_change_list(x.remove_attendees.as_deref(), "remove_attendees")?;
+    if let Some(both) = add.iter().find(|a| remove.contains(a)) {
+        return Err(format!(
+            "{both} is in both add_attendees and remove_attendees"
+        ));
+    }
+    let fields = UpdateEventParams {
+        entry_id: x.entry_id.clone(),
+        store_id: x.store_id.clone(),
+        subject: x.subject.clone(),
+        start: x.start.clone(),
+        end: x.end.clone(),
+        location: x.location.clone(),
+        body: x.body.clone(),
+    };
+    match validate_update_event(&fields) {
+        Err(e) if e == "nothing to change" && !(add.is_empty() && remove.is_empty()) => {}
+        other => other?,
+    }
     let payload = serde_json::json!({
         "subject": x.subject, "start": x.start, "end": x.end,
         "location": x.location, "body": x.body,
+        "whole_series": x.whole_series.unwrap_or(false),
+        "add_attendees": add, "remove_attendees": remove,
     });
     Ok(ActionTarget {
         kind: ActionKind::UpdateMeeting,
@@ -1496,7 +1631,7 @@ mod tests {
                 start: None,
                 end: None,
                 location: None,
-                body: None
+                body: None,
             })
             .capability(),
             Capability::Events
@@ -1580,6 +1715,57 @@ mod tests {
             validate_update_event(&update(None)).is_err(),
             "nothing to change"
         );
+        let series = UpdateMeetingParams {
+            entry_id: "m1".into(),
+            store_id: None,
+            subject: Some("New title".into()),
+            start: None,
+            end: None,
+            location: None,
+            body: None,
+            whole_series: Some(true),
+            add_attendees: None,
+            remove_attendees: None,
+        };
+        let hash_payload = |flag: Option<bool>| {
+            let mut x = series.clone();
+            x.whole_series = flag;
+            prepare_update_meeting(&x)
+                .unwrap()
+                .payload
+                .unwrap()
+                .to_string()
+        };
+        assert_ne!(hash_payload(Some(true)), hash_payload(None));
+        assert_eq!(hash_payload(None), hash_payload(Some(false)));
+        // whole_series gate
+        assert!(series_gate(0, false).is_ok());
+        assert!(series_gate(0, true).is_ok());
+        assert!(series_gate(1, true).is_ok());
+        let refused = series_gate(1, false).unwrap_err();
+        assert!(refused.contains("every occurrence") && refused.contains("whole_series=true"));
+        for state in [2, 3] {
+            assert!(
+                series_gate(state, true)
+                    .unwrap_err()
+                    .contains("one occurrence")
+            );
+        }
+        assert_eq!(
+            describe_series(1, 2, 2 | 8, None, 0),
+            "repeats every 2 weeks on Monday, Wednesday, with no end date"
+        );
+        assert_eq!(
+            describe_series(0, 1, 0, Some("2027-01-31T00:00:00"), 0),
+            "repeats every day, until 2027-01-31"
+        );
+        assert_eq!(
+            describe_series(2, 1, 0, None, 10),
+            "repeats every month, 10 times"
+        );
+        assert!(series_warnings(false)[0].contains("apply to every occurrence"));
+        assert_eq!(series_warnings(false).len(), 1);
+        assert!(series_warnings(true)[1].contains("may be reset by Outlook"));
         assert!(validate_update_event(&update(Some("New title"))).is_ok());
         let task = |s: &str, imp: Option<&str>| CreateTaskParams {
             subject: s.into(),
@@ -2177,6 +2363,73 @@ mod tests {
         let mut x = base();
         x.is_online_meeting = Some(true);
         assert!(prepare_invite_meeting(&x).is_err());
+    }
+
+    #[test]
+    fn meeting_attendee_changes_are_validated_normalized_and_hashed() {
+        let base = || UpdateMeetingParams {
+            entry_id: "m1".into(),
+            store_id: None,
+            subject: None,
+            start: None,
+            end: None,
+            location: None,
+            body: None,
+            whole_series: None,
+            add_attendees: None,
+            remove_attendees: None,
+        };
+        assert!(
+            prepare_update_meeting(&base()).is_err(),
+            "nothing to change"
+        );
+        let mut x = base();
+        x.add_attendees = Some(vec![" A@B.example ".into()]);
+        let target = prepare_update_meeting(&x).unwrap();
+        assert_eq!(target.kind, ActionKind::UpdateMeeting);
+        assert_eq!(target.capability(), Capability::Send);
+        let payload = target.payload.clone().unwrap();
+        assert_eq!(payload["add_attendees"], serde_json::json!(["a@b.example"]));
+        let mut y = base();
+        y.remove_attendees = Some(vec!["a@b.example".into()]);
+        assert_ne!(
+            payload,
+            prepare_update_meeting(&y).unwrap().payload.unwrap(),
+            "the hashed payload differs when the lists differ"
+        );
+        let mut empty = base();
+        empty.add_attendees = Some(vec![]);
+        assert!(prepare_update_meeting(&empty).is_err());
+        let mut field = base();
+        field.subject = Some("New".into());
+        field.add_attendees = Some(vec![]);
+        assert!(prepare_update_meeting(&field).is_ok());
+        for bad in ["Bob", "a@b@c", "a b@c.example", "x@y.example;z@y.example"] {
+            let mut x = base();
+            x.add_attendees = Some(vec![bad.into()]);
+            assert!(prepare_update_meeting(&x).is_err(), "{bad}");
+            let mut x = base();
+            x.remove_attendees = Some(vec![bad.into()]);
+            assert!(prepare_update_meeting(&x).is_err(), "{bad}");
+        }
+        let mut dup = base();
+        dup.add_attendees = Some(vec!["a@b.example".into(), "A@b.example".into()]);
+        assert!(prepare_update_meeting(&dup).is_err());
+        let mut overlap = base();
+        overlap.add_attendees = Some(vec!["a@b.example".into()]);
+        overlap.remove_attendees = Some(vec!["A@B.example".into()]);
+        assert!(
+            prepare_update_meeting(&overlap)
+                .unwrap_err()
+                .contains("a@b.example")
+        );
+        let many =
+            |n: usize| -> Vec<String> { (0..n).map(|i| format!("u{i}@b.example")).collect() };
+        let mut cap = base();
+        cap.add_attendees = Some(many(101));
+        assert!(prepare_update_meeting(&cap).is_err());
+        cap.add_attendees = Some(many(100));
+        assert!(prepare_update_meeting(&cap).is_ok());
     }
 
     #[test]

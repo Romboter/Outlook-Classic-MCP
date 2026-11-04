@@ -29,10 +29,10 @@ use contracts::{
     ListMailsParams, ListTasksParams, MailCommand, MarkMailParams, MoveMailParams, ReplyMailParams,
     ResolveNameParams, RespondEventParams, SaveAttachmentsParams, SearchContactsParams,
     SearchMailsParams, SendDraftParams, SendMailParams, SetCategoryParams, ThreadParams,
-    ToggleRuleParams, UpdateEventParams, UpdateTaskParams, checked_send_id, prepare_cancel_meeting,
-    prepare_delete, prepare_forward_mail, prepare_invite_meeting, prepare_reply_mail,
-    prepare_respond_event, prepare_save_attachments, prepare_send_mail, prepare_toggle_rule,
-    prepare_update_meeting,
+    ToggleRuleParams, UpdateEventParams, UpdateMeetingParams, UpdateTaskParams, checked_send_id,
+    prepare_cancel_meeting, prepare_delete, prepare_forward_mail, prepare_invite_meeting,
+    prepare_reply_mail, prepare_respond_event, prepare_save_attachments, prepare_send_mail,
+    prepare_toggle_rule, prepare_update_meeting,
 };
 use outlook::OutlookBridge;
 use policy::{Capability, Policy};
@@ -885,7 +885,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Change the subject, start, end, location or description of a meeting you organized and email the update to every attendee, only after the user approves a prompt showing each change and every attendee (outside-organization attendees are marked). Refused for events without attendees (use outlook_update_event), meetings you did not organize, cancelled and recurring meetings. Cannot add or remove attendees. Requires send permission (server mode full). Check `done` in the result; on unknown_outcome call outlook_check_action and never retry.",
+        description = "Change the subject, start, end, location or description of a meeting you organized and email the update to every attendee, only after the user approves a prompt showing each change and every attendee (outside-organization attendees are marked). Can also add attendees (`add_attendees`) and remove attendees (`remove_attendees`, plain email addresses; removed people are sent a cancellation); the prompt lists who is added and removed. Refused for events without attendees (use outlook_update_event), meetings you did not organize, cancelled meetings, adding someone already invited, removing someone who is not an attendee or the organizer, and removing every attendee (use outlook_cancel_meeting). A recurring meeting can be changed as a whole series only: pass whole_series=true (the prompt then shows the recurrence and warns that the change and update email apply to every occurrence); the recurrence pattern itself is not changed, and a single occurrence (or exception) is refused. whole_series is ignored for non-recurring meetings. Requires send permission (server mode full). Check `done` in the result; on unknown_outcome call outlook_check_action and never retry.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -896,7 +896,7 @@ impl OutlookMcp {
     async fn outlook_update_meeting(
         &self,
         peer: Peer<RoleServer>,
-        Parameters(params): Parameters<UpdateEventParams>,
+        Parameters(params): Parameters<UpdateMeetingParams>,
     ) -> CallToolResult {
         match prepare_update_meeting(&params) {
             Ok(target) => self.confirmed(peer, target).await,

@@ -12,11 +12,13 @@
 use super::cancel::{attendees, smtp_address};
 use super::compose::{fnv1a, new_id};
 use super::delete::{in_deleted_items, stamp_of};
-use super::mailbox::{default_folder, optional_text};
+use super::mailbox::{bool_property, default_folder, optional_text};
 use super::schedule::{date_iso, date_variant, resolve_bound};
 use super::win;
 use crate::action::{ActionPreview, ActionTarget, Fact};
-use crate::contracts::{RecurrenceParams, describe_recurrence};
+use crate::contracts::{
+    RecurrenceParams, describe_recurrence, describe_series, series_gate, series_warnings,
+};
 use crate::ticket::{NOT_SENT, UNKNOWN_OUTCOME};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -85,8 +87,17 @@ fn own_domain(namespace: &IDispatch) -> Option<String> {
         .map(|(_, domain)| domain.to_ascii_lowercase())
 }
 
+fn own_address(namespace: &IDispatch) -> Option<String> {
+    let user = win::object_property(namespace, "CurrentUser").ok()?;
+    let smtp = smtp_address(&user).to_ascii_lowercase();
+    (!smtp.is_empty()).then_some(smtp)
+}
+
 fn describe_attendees(namespace: &IDispatch, addresses: &[String]) -> (String, usize) {
-    let own = own_domain(namespace);
+    describe_with_domain(own_domain(namespace), addresses)
+}
+
+fn describe_with_domain(own: Option<String>, addresses: &[String]) -> (String, usize) {
     let mut external = 0;
     let mut parts: Vec<String> = addresses
         .iter()
@@ -301,8 +312,9 @@ fn item_by_id(namespace: &IDispatch, target: &ActionTarget) -> Result<IDispatch>
         .context("Event no longer available; EntryID may be stale")
 }
 
-/// Pre-prompt refusals: only an open, non-recurring meeting you organized.
-fn check_updatable(namespace: &IDispatch, item: &IDispatch) -> Result<()> {
+/// Pre-prompt refusals: only an open meeting you organized; a recurring one
+/// only as a whole series and with `whole_series` acknowledged.
+fn check_updatable(namespace: &IDispatch, item: &IDispatch, payload: &Value) -> Result<()> {
     if win::int_property(item, "Class")? != OL_CLASS_APPOINTMENT {
         bail!("that EntryID does not identify a calendar event");
     }
@@ -315,23 +327,149 @@ fn check_updatable(namespace: &IDispatch, item: &IDispatch) -> Result<()> {
         5 => bail!("that meeting is cancelled"),
         _ => bail!("you did not organize that meeting; only the organizer can change it"),
     }
-    if win::int_property(item, "RecurrenceState").unwrap_or(0) != 0 {
-        bail!("recurring meetings cannot be updated yet");
+    // An unreadable state is treated as an occurrence: refuse rather than guess.
+    let state = win::int_property(item, "RecurrenceState").unwrap_or(2);
+    let whole = payload["whole_series"].as_bool().unwrap_or(false);
+    series_gate(state, whole).map_err(anyhow::Error::msg)
+}
+
+/// The series recurrence as plain words plus whether it has exceptions; empty
+/// and false for a non-recurring item. Part of the approval hash.
+fn series_of(item: &IDispatch) -> (String, bool) {
+    if win::int_property(item, "RecurrenceState").unwrap_or(0) == 0 {
+        return (String::new(), false);
     }
-    Ok(())
+    let Ok(pattern) = win::method_object(item, "GetRecurrencePattern", vec![]) else {
+        return ("an unreadable recurrence pattern".into(), false);
+    };
+    let end = if bool_property(&pattern, "NoEndDate") {
+        None
+    } else {
+        date_iso(&pattern, "PatternEndDate")
+    };
+    let words = describe_series(
+        win::int_property(&pattern, "RecurrenceType").unwrap_or(-1),
+        win::int_property(&pattern, "Interval").unwrap_or(1),
+        win::int_property(&pattern, "DaysOfWeekMask").unwrap_or(0),
+        end.as_deref(),
+        if bool_property(&pattern, "NoEndDate") {
+            0
+        } else {
+            win::int_property(&pattern, "Occurrences").unwrap_or(0)
+        },
+    );
+    let exceptions = win::object_property(&pattern, "Exceptions")
+        .and_then(|e| win::int_property(&e, "Count"))
+        .unwrap_or(0)
+        > 0;
+    (words, exceptions)
 }
 
 fn identity_of(entry_id: &str, item: &IDispatch, payload: &Value) -> String {
     let (count, listed) = attendees(item);
     fnv1a(&format!(
-        "{entry_id}|{}|{}|{}|{}|{}|{count}|{}|{payload}",
+        "{entry_id}|{}|{}|{}|{}|{}|{count}|{}|{}|{payload}|{}",
         optional_text(item, "Subject"),
         date_iso(item, "Start").unwrap_or_default(),
         date_iso(item, "End").unwrap_or_default(),
         optional_text(item, "Location"),
         fnv1a(&optional_text(item, "Body")),
-        listed.join(";")
+        listed.join(";"),
+        current_attendees(item).join(","),
+        series_of(item).0
     ))
+}
+
+const OL_ORGANIZER_TYPE: i32 = 0;
+const MAX_ATTENDEES: usize = 100;
+
+/// Lowercased SMTP address of every non-organizer recipient (no listing cap).
+fn current_attendees(item: &IDispatch) -> Vec<String> {
+    let Ok(recipients) = win::object_property(item, "Recipients") else {
+        return vec![];
+    };
+    let count = win::int_property(&recipients, "Count").unwrap_or(0).max(0);
+    (1..=count)
+        .filter_map(|i| win::method_object(&recipients, "Item", vec![VARIANT::from(i)]).ok())
+        .filter(|r| win::int_property(r, "Type").unwrap_or(OL_REQUIRED) != OL_ORGANIZER_TYPE)
+        .map(|r| smtp_address(&r).to_ascii_lowercase())
+        .filter(|a| !a.is_empty())
+        .collect()
+}
+
+fn string_list(payload: &Value, key: &str) -> Vec<String> {
+    payload[key]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The attendee list after the requested changes, or a plain refusal naming the address.
+fn plan_attendees(
+    current: &[String],
+    own: Option<&str>,
+    adds: &[String],
+    removes: &[String],
+) -> Result<Vec<String>> {
+    for a in adds {
+        if current.contains(a) {
+            bail!("{a} is already an attendee; nothing was changed");
+        }
+    }
+    for r in removes {
+        if own == Some(r.as_str()) {
+            bail!("{r} is the organizer and cannot be removed; nothing was changed");
+        }
+        if !current.contains(r) {
+            bail!("{r} is not an attendee of this meeting; nothing was changed");
+        }
+    }
+    let mut result: Vec<String> = current
+        .iter()
+        .filter(|a| !removes.contains(a))
+        .cloned()
+        .collect();
+    result.extend(adds.iter().cloned());
+    if result.is_empty() {
+        bail!("that would leave the meeting with no attendees; use outlook_cancel_meeting instead");
+    }
+    if result.len() > MAX_ATTENDEES {
+        bail!(
+            "that would make {} attendees; the limit is {MAX_ATTENDEES}",
+            result.len()
+        );
+    }
+    Ok(result)
+}
+
+/// Prompt lines for the attendee diff, and how many named addresses are outside the organization.
+fn diff_facts(own: Option<&str>, adds: &[String], removes: &[String]) -> (Vec<Fact>, usize) {
+    let mut facts = Vec::new();
+    let mut external = 0;
+    if !adds.is_empty() {
+        let (text, n) = describe_with_domain(own.map(String::from), adds);
+        external += n;
+        facts.push(fact("Adding", text));
+    }
+    if !removes.is_empty() {
+        let (text, n) = describe_with_domain(own.map(String::from), removes);
+        external += n;
+        facts.push(fact(
+            "Removing",
+            format!("{text} (they will receive a cancellation)"),
+        ));
+    }
+    (facts, external)
+}
+
+/// Done when every added address is listed and every removed one is not.
+fn attendees_applied(current: &[String], adds: &[String], removes: &[String]) -> bool {
+    adds.iter().all(|a| current.contains(a)) && removes.iter().all(|r| !current.contains(r))
 }
 
 /// Minute-precision local time of a request value, for comparing with Outlook's.
@@ -350,7 +488,7 @@ fn current_minutes(item: &IDispatch, name: &str) -> String {
 pub(super) fn prepare_update(namespace: &IDispatch, target: &ActionTarget) -> Result<Value> {
     let payload = payload_of(target)?;
     let item = item_by_id(namespace, target)?;
-    check_updatable(namespace, &item)?;
+    check_updatable(namespace, &item, payload)?;
     let new_start = text(payload, "start").map(|s| minutes_of(&s)).transpose()?;
     let new_end = text(payload, "end").map(|s| minutes_of(&s)).transpose()?;
     let start = new_start
@@ -383,24 +521,29 @@ pub(super) fn prepare_update(namespace: &IDispatch, target: &ActionTarget) -> Re
     if text(payload, "body").is_some() {
         facts.push(fact("Description", "will be replaced".into()));
     }
-    let (count, listed) = attendees(&item);
-    if count == 0 {
+    let current = current_attendees(&item);
+    if current.is_empty() {
         bail!("that meeting lists no attendees; use outlook_update_event instead");
     }
-    let addresses: Vec<String> = listed
-        .iter()
-        .map(|entry| {
-            entry
-                .rsplit_once('<')
-                .map(|(_, a)| a.trim_end_matches('>').to_string())
-                .unwrap_or_else(|| entry.clone())
-        })
-        .collect();
+    let (adds, removes) = (
+        string_list(payload, "add_attendees"),
+        string_list(payload, "remove_attendees"),
+    );
+    let own = own_address(namespace);
+    let addresses = plan_attendees(&current, own.as_deref(), &adds, &removes)?;
+    let count = addresses.len();
+    let (diff, _) = diff_facts(own_domain(namespace).as_deref(), &adds, &removes);
+    facts.extend(diff);
     let (attendee_text, external) = describe_attendees(namespace, &addresses);
     facts.push(fact("Attendees told", attendee_text));
     let mut warnings = vec![format!(
         "An update is emailed to all {count} attendees and cannot be recalled."
     )];
+    let (series, has_exceptions) = series_of(&item);
+    if !series.is_empty() {
+        facts.push(fact("Repeats", series));
+        warnings.extend(series_warnings(has_exceptions));
+    }
     if external > 0 {
         warnings.push(format!(
             "{external} attendee(s) are outside your organization."
@@ -425,7 +568,7 @@ pub(super) fn execute_update(
 ) -> Result<Value> {
     let payload = payload_of(target).map_err(|e| not_done(&format!("{e:#}")))?;
     let item = item_by_id(namespace, target).map_err(|e| not_done(&format!("{e:#}")))?;
-    check_updatable(namespace, &item).map_err(|e| not_done(&format!("{e:#}")))?;
+    check_updatable(namespace, &item, payload).map_err(|e| not_done(&format!("{e:#}")))?;
     if stamp_of(&item).as_deref() != Some(preview.action_id.as_str()) {
         return Err(not_done("the event does not carry this action id"));
     }
@@ -451,6 +594,11 @@ pub(super) fn execute_update(
         if let Some(body) = text(payload, "body") {
             win::put_property(&item, "Body", VARIANT::from(body.as_str()))?;
         }
+        change_attendees(
+            &item,
+            &string_list(payload, "add_attendees"),
+            &string_list(payload, "remove_attendees"),
+        )?;
         Ok(())
     };
     apply().map_err(|e| {
@@ -472,7 +620,49 @@ pub(super) fn execute_update(
     Ok(json!({"done": true, "update_sent": true}))
 }
 
+/// Remove then add recipients on the in-memory item (nothing is mailed until Send).
+fn change_attendees(item: &IDispatch, adds: &[String], removes: &[String]) -> Result<()> {
+    if adds.is_empty() && removes.is_empty() {
+        return Ok(());
+    }
+    let recipients = win::object_property(item, "Recipients")?;
+    let mut pending: Vec<&String> = removes.iter().collect();
+    let count = win::int_property(&recipients, "Count").unwrap_or(0).max(0);
+    for i in (1..=count).rev() {
+        let recipient = win::method_object(&recipients, "Item", vec![VARIANT::from(i)])?;
+        let smtp = smtp_address(&recipient).to_ascii_lowercase();
+        if let Some(pos) = pending.iter().position(|r| **r == smtp) {
+            win::invoke(&recipient, "Delete", DISPATCH_METHOD, vec![])?;
+            pending.remove(pos);
+        }
+    }
+    if let Some(missing) = pending.first() {
+        bail!("{missing} was not found among the attendees");
+    }
+    for address in adds {
+        let recipient =
+            win::method_object(&recipients, "Add", vec![VARIANT::from(address.as_str())])?;
+        win::put_property(&recipient, "Type", VARIANT::from(OL_REQUIRED))?;
+        let ok = win::invoke(&recipient, "Resolve", DISPATCH_METHOD, vec![])
+            .ok()
+            .and_then(|v| bool::try_from(&v).ok())
+            .unwrap_or(false);
+        if !ok {
+            bail!("'{address}' could not be resolved to a mailbox");
+        }
+        if smtp_address(&recipient).is_empty() {
+            bail!("'{address}' resolved to an address that cannot be shown");
+        }
+    }
+    let total = current_attendees(item).len();
+    if total == 0 || total > MAX_ATTENDEES {
+        bail!("the attendee list would have {total} entries");
+    }
+    Ok(())
+}
+
 /// Done when every requested field now has its requested value.
+/// Attendee changes are checked against the saved list; unreadable means unknown.
 pub(super) fn locate_update(namespace: &IDispatch, target: Option<&ActionTarget>) -> Result<Value> {
     let Some(target) = target else {
         return Ok(json!({"located": "unknown"}));
@@ -494,5 +684,84 @@ pub(super) fn locate_update(namespace: &IDispatch, target: Option<&ActionTarget>
     if let Some(v) = text(payload, "end") {
         matches &= minutes_of(&v)? == current_minutes(&item, "End");
     }
+    let (adds, removes) = (
+        string_list(payload, "add_attendees"),
+        string_list(payload, "remove_attendees"),
+    );
+    if !adds.is_empty() || !removes.is_empty() {
+        let current = current_attendees(&item);
+        if current.is_empty() {
+            return Ok(json!({"located": "unknown"}));
+        }
+        matches &= attendees_applied(&current, &adds, &removes);
+    }
     Ok(json!({"located": if matches { "done" } else { "not_done" }}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn attendee_plan_refuses_bad_changes_by_name() {
+        let cur = v(&["a@x.example", "b@x.example"]);
+        let me = Some("me@x.example");
+        let err = |adds: &[&str], removes: &[&str]| {
+            plan_attendees(&cur, me, &v(adds), &v(removes))
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(err(&["a@x.example"], &[]).contains("a@x.example is already an attendee"));
+        assert!(err(&[], &["z@x.example"]).contains("z@x.example is not an attendee"));
+        assert!(err(&[], &["a@x.example", "b@x.example"]).contains("outlook_cancel_meeting"));
+        let mut with_me = cur.clone();
+        with_me.push("me@x.example".into());
+        let e = plan_attendees(&with_me, me, &[], &v(&["me@x.example"]))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("me@x.example is the organizer"));
+        let many: Vec<String> = (0..100).map(|i| format!("u{i}@x.example")).collect();
+        assert!(
+            plan_attendees(&many, me, &v(&["n@x.example"]), &[])
+                .unwrap_err()
+                .to_string()
+                .contains("101")
+        );
+        let ok = plan_attendees(&cur, me, &v(&["c@x.example"]), &v(&["a@x.example"])).unwrap();
+        assert_eq!(ok, v(&["b@x.example", "c@x.example"]));
+        assert!(plan_attendees(&many, me, &v(&["n@x.example"]), &v(&["u0@x.example"])).is_ok());
+    }
+
+    #[test]
+    fn prompt_shows_the_diff_and_marks_outsiders() {
+        let (facts, external) = diff_facts(
+            Some("x.example"),
+            &v(&["new@x.example", "out@y.example"]),
+            &v(&["old@y.example"]),
+        );
+        assert_eq!(facts[0].label, "Adding");
+        assert!(facts[0].value.contains("out@y.example (EXTERNAL)"));
+        assert!(!facts[0].value.contains("new@x.example (EXTERNAL)"));
+        assert_eq!(facts[1].label, "Removing");
+        assert!(facts[1].value.contains("old@y.example (EXTERNAL)"));
+        assert!(facts[1].value.contains("they will receive a cancellation"));
+        assert_eq!(external, 2);
+        assert!(diff_facts(None, &[], &[]).0.is_empty());
+    }
+
+    #[test]
+    fn readback_needs_adds_present_and_removes_absent() {
+        let cur = v(&["a@x.example", "c@x.example"]);
+        assert!(attendees_applied(
+            &cur,
+            &v(&["c@x.example"]),
+            &v(&["b@x.example"])
+        ));
+        assert!(!attendees_applied(&cur, &v(&["d@x.example"]), &[]));
+        assert!(!attendees_applied(&cur, &[], &v(&["a@x.example"])));
+    }
 }

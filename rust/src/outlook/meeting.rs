@@ -16,6 +16,7 @@ use super::mailbox::{default_folder, optional_text};
 use super::schedule::{date_iso, date_variant, resolve_bound};
 use super::win;
 use crate::action::{ActionPreview, ActionTarget, Fact};
+use crate::contracts::{RecurrenceParams, describe_recurrence};
 use crate::ticket::{NOT_SENT, UNKNOWN_OUTCOME};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -144,6 +145,9 @@ fn build_invite(application: &IDispatch, payload: &Value) -> Result<(IDispatch, 
         )?;
     }
     win::put_property(&item, "MeetingStatus", VARIANT::from(OL_MEETING))?;
+    if let Some(spec) = recurrence_of(payload)? {
+        super::schedule_write::apply_recurrence(&item, &spec, &start)?;
+    }
     let recipients = win::object_property(&item, "Recipients")?;
     let wanted: Vec<&str> = payload["attendees"]
         .as_array()
@@ -171,6 +175,16 @@ fn build_invite(application: &IDispatch, payload: &Value) -> Result<(IDispatch, 
     Ok((item, resolved))
 }
 
+/// The recurrence requested in the payload, if any.
+fn recurrence_of(payload: &Value) -> Result<Option<RecurrenceParams>> {
+    match payload.get("recurrence") {
+        None | Some(Value::Null) => Ok(None),
+        Some(spec) => serde_json::from_value(spec.clone())
+            .map(Some)
+            .context("the recurrence in the request is invalid"),
+    }
+}
+
 fn invite_hash(payload: &Value, resolved: &[String]) -> String {
     fnv1a(&format!("{payload}|{}", resolved.join(",")))
 }
@@ -192,16 +206,22 @@ pub(super) fn prepare_invite(
             "{external} attendee(s) are outside your organization."
         ));
     }
+    let mut facts = vec![
+        fact("Meeting", optional_text(&item, "Subject")),
+        fact("Starts", date_iso(&item, "Start").unwrap_or_default()),
+        fact("Ends", date_iso(&item, "End").unwrap_or_default()),
+        fact("Location", optional_text(&item, "Location")),
+    ];
+    if let Some(spec) = recurrence_of(payload)? {
+        let start = resolve_bound(&text(payload, "start").unwrap_or_default())?;
+        facts.push(fact("Repeats", describe_recurrence(&spec, &start)));
+        warnings.push("This is a recurring series: every occurrence is invited.".into());
+    }
+    facts.push(fact("Attendees", attendee_text));
     let preview = ActionPreview {
         action_id: new_id(),
         summary: "Create this meeting and email the invitations.".into(),
-        facts: vec![
-            fact("Meeting", optional_text(&item, "Subject")),
-            fact("Starts", date_iso(&item, "Start").unwrap_or_default()),
-            fact("Ends", date_iso(&item, "End").unwrap_or_default()),
-            fact("Location", optional_text(&item, "Location")),
-            fact("Attendees", attendee_text),
-        ],
+        facts,
         warnings,
         hash: invite_hash(payload, &resolved),
     };

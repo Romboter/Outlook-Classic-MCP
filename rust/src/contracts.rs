@@ -613,30 +613,104 @@ fn checked_attendees(list: &[String]) -> Result<Vec<String>, String> {
     Ok(seen)
 }
 
+/// 0 = Sunday .. 6 = Saturday.
+pub fn weekday_of(t: &LocalTime) -> usize {
+    const T: [i32; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let y = if t.month < 3 { t.year - 1 } else { t.year };
+    ((y + y / 4 - y / 100 + y / 400 + T[(t.month - 1) as usize] + t.day as i32) % 7) as usize
+}
+
+const WEEKDAYS: [&str; 7] = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+];
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+/// Outlook's day-of-week mask bit for the start date (Sunday 1 .. Saturday 64).
+pub fn weekday_mask(start: &LocalTime) -> i32 {
+    1 << weekday_of(start)
+}
+
+/// The recurrence in plain words, for the approval prompt. The series runs on
+/// the weekday / day of month / date of the start, which is what is applied.
+pub fn describe_recurrence(r: &RecurrenceParams, start: &LocalTime) -> String {
+    let n = r.interval.unwrap_or(1);
+    let every = |unit: &str| {
+        if n == 1 {
+            format!("every {unit}")
+        } else {
+            format!("every {n} {unit}s")
+        }
+    };
+    let pattern = match r.kind.as_str() {
+        "daily" => every("day"),
+        "weekly" => format!("{} on {}", every("week"), WEEKDAYS[weekday_of(start)]),
+        "monthly" => format!("{} on day {}", every("month"), start.day),
+        _ => format!(
+            "{} on {} {}",
+            every("year"),
+            start.day,
+            MONTHS[(start.month - 1) as usize]
+        ),
+    };
+    let end = match (r.occurrences, &r.end_date) {
+        (Some(o), _) => format!("{o} times"),
+        (None, Some(d)) => format!("until {}", d.get(..10).unwrap_or(d)),
+        (None, None) => "with no end date".into(),
+    };
+    format!("repeats {pattern}, starting {}, {end}", start.iso())
+}
+
 pub fn prepare_invite_meeting(x: &CreateEventParams) -> Result<ActionTarget, String> {
     let attendees = checked_attendees(x.attendees.as_deref().unwrap_or(&[]))?;
     let mut plain = x.clone();
     plain.attendees = None;
     validate_create_event(&plain)?;
-    if x.recurrence.is_some() {
-        return Err("recurring meetings with attendees are not supported yet".into());
-    }
     let (start, end) = (parsed(&x.start, "start")?, parsed(&x.end, "end")?);
+    let recurrence = x.recurrence.as_ref().map(|r| {
+        serde_json::json!({
+            "type": r.kind, "interval": r.interval,
+            "occurrences": r.occurrences, "end_date": r.end_date,
+        })
+    });
     let payload = serde_json::json!({
         "subject": x.subject, "start": x.start, "end": x.end,
         "location": x.location, "body": x.body, "attendees": attendees,
         "reminder_minutes": x.reminder_minutes.unwrap_or(15),
         "no_reminder": x.no_reminder.unwrap_or(false),
+        "recurrence": recurrence,
     });
     Ok(ActionTarget {
         kind: ActionKind::InviteMeeting,
         // Identifies the request, so an identical retry after an unknown outcome is blocked.
         entry_id: format!(
-            "invite|{}|{}|{}|{}",
+            "invite|{}|{}|{}|{}|{}",
             x.subject.trim(),
             start.minutes(),
             end.minutes(),
-            attendees.join(",")
+            attendees.join(","),
+            x.recurrence
+                .as_ref()
+                .map(|r| describe_recurrence(r, &start))
+                .unwrap_or_default()
         ),
         store_id: None,
         enabled: None,
@@ -1869,14 +1943,65 @@ mod tests {
         let mut x = base();
         x.is_online_meeting = Some(true);
         assert!(prepare_invite_meeting(&x).is_err());
-        let mut x = base();
-        x.recurrence = Some(RecurrenceParams {
-            kind: "daily".into(),
-            interval: None,
-            occurrences: None,
-            end_date: None,
-        });
+    }
+
+    #[test]
+    fn recurring_meetings_are_accepted_described_and_hashed_into_the_payload() {
+        let base = |kind: &str, occ: Option<u32>| CreateEventParams {
+            subject: "Sync".into(),
+            start: "2030-02-04T10:00:00".into(),
+            end: "2030-02-04T10:30:00".into(),
+            location: None,
+            body: None,
+            attendees: Some(vec!["a@b.example".into()]),
+            is_online_meeting: None,
+            reminder_minutes: None,
+            no_reminder: None,
+            recurrence: Some(RecurrenceParams {
+                kind: kind.into(),
+                interval: None,
+                occurrences: occ,
+                end_date: None,
+            }),
+        };
+        let weekly = prepare_invite_meeting(&base("weekly", Some(10))).unwrap();
+        let payload = weekly.payload.clone().unwrap();
+        assert_eq!(payload["recurrence"]["type"], "weekly");
+        assert_eq!(payload["recurrence"]["occurrences"], 10);
+        let other = prepare_invite_meeting(&base("weekly", Some(11))).unwrap();
+        assert_ne!(payload, other.payload.clone().unwrap());
+        assert_ne!(weekly.entry_id, other.entry_id);
+        let daily = prepare_invite_meeting(&base("daily", Some(10))).unwrap();
+        assert_ne!(payload, daily.payload.unwrap());
+        // Validation still applies to the recurrence of a meeting.
+        assert!(prepare_invite_meeting(&base("hourly", None)).is_err());
+        let mut x = base("daily", None);
+        x.recurrence.as_mut().unwrap().interval = Some(0);
         assert!(prepare_invite_meeting(&x).is_err());
+    }
+
+    #[test]
+    fn recurrence_is_described_in_plain_words() {
+        let start = LocalTime::parse("2030-02-04T10:00:00").unwrap(); // a Monday
+        assert_eq!(weekday_of(&start), 1);
+        assert_eq!(weekday_mask(&start), 2);
+        let r = |kind: &str, interval, occurrences, end_date: Option<&str>| RecurrenceParams {
+            kind: kind.into(),
+            interval,
+            occurrences,
+            end_date: end_date.map(Into::into),
+        };
+        let text = describe_recurrence(&r("weekly", None, Some(10), None), &start);
+        assert!(text.contains("every week on Monday"), "{text}");
+        assert!(text.contains("10 times"), "{text}");
+        let text = describe_recurrence(&r("weekly", Some(2), None, Some("2030-06-01")), &start);
+        assert!(text.contains("every 2 weeks on Monday"), "{text}");
+        assert!(text.contains("until 2030-06-01"), "{text}");
+        let text = describe_recurrence(&r("monthly", None, None, None), &start);
+        assert!(text.contains("every month on day 4"), "{text}");
+        assert!(text.contains("no end date"), "{text}");
+        let text = describe_recurrence(&r("yearly", None, Some(3), None), &start);
+        assert!(text.contains("every year on 4 February"), "{text}");
     }
 
     #[test]

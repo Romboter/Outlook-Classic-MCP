@@ -8,6 +8,8 @@
 
 **Meeting invitations and updates (issue #8, draft):** `outlook_create_event` accepts `attendees` (plain addresses) and needs approval; new `outlook_update_meeting` (deviation: the design said `outlook_update_event`, which still refuses meetings and now points at it). Python sent invitations immediately. Live-tested against a self-invite only; recurring meetings, attendee changes and online meetings are not supported.
 
+**Recurring meetings and join links (G27, G31; unit-tested only, not run live):** `outlook_create_event` accepts `attendees` together with `recurrence`; the approval prompt states the recurrence in words and the hash covers it; `outlook_update_meeting` still refuses recurring meetings. `outlook_get_event` adds `online_meeting_link` and `online_meeting_link_source` (body-extracted, conservative host allowlist).
+
 **Cancel meeting (issue #8, draft):** new `outlook_cancel_meeting` (no Python equivalent; Python deleted meetings without telling attendees). Run live once against a self-invited test meeting (attendee is the owner only); other attendees, recurring series and failure paths untested. Inviting and updating meetings with attendees are still not implemented.
 
 **Confirmed meeting responses (issue #8/#9, draft):** `outlook_respond_event` (30 of 31 names). Python answered immediately and mailed the organizer without anyone seeing it; Rust needs a person's approval of a prompt, refuses non-invitations, meetings you organized and cancelled meetings before any prompt, and `send_response=false` needs only the `events` capability. The accept, tentative and decline paths are verified against fakes and Microsoft's documentation only, not against a real received invitation. Still not implemented: `outlook_save_attachments`.

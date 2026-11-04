@@ -592,7 +592,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Read one calendar event by handle from list_events (or raw EntryID), including attendees. Body capped at 4000 characters by default (max_body_chars up to 50000; body_truncated)."
+        description = "Read one calendar event by handle from list_events (or raw EntryID), including attendees and, when the body holds a Teams/Zoom/Meet/Webex https join link, online_meeting_link (online_meeting_link_source body; null otherwise). Body capped at 4000 characters by default (max_body_chars up to 50000; body_truncated)."
     )]
     async fn outlook_get_event(
         &self,
@@ -835,7 +835,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Create a calendar event. Without attendees it is on your own calendar only (events permission, server mode full). With `attendees` (plain email addresses) it is a meeting: invitations are emailed only after the user approves a prompt listing every attendee (outside-organization ones marked), and it needs send permission; recurring meetings and online meetings are not supported yet. Nothing is created if the prompt is declined or the client cannot show it. Times are local ISO-8601 or carry a UTC offset.",
+        description = "Create a calendar event. Without attendees it is on your own calendar only (events permission, server mode full). With `attendees` (plain email addresses) it is a meeting: invitations are emailed only after the user approves a prompt listing every attendee (outside-organization ones marked), and it needs send permission; a recurring meeting (recurrence) is allowed and the prompt states the pattern in words; online meetings are not supported yet. Nothing is created if the prompt is declined or the client cannot show it. Times are local ISO-8601 or carry a UTC offset.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,

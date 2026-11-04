@@ -105,7 +105,11 @@ pub(super) fn complete_task(namespace: &IDispatch, params: CompleteTaskParams) -
     }))
 }
 
-fn apply_recurrence(event: &IDispatch, spec: &RecurrenceParams) -> Result<()> {
+pub(super) fn apply_recurrence(
+    event: &IDispatch,
+    spec: &RecurrenceParams,
+    start: &LocalTime,
+) -> Result<()> {
     let pattern = win::method_object(event, "GetRecurrencePattern", vec![])?;
     let kind = match spec.kind.as_str() {
         "daily" => 0,
@@ -114,6 +118,14 @@ fn apply_recurrence(event: &IDispatch, spec: &RecurrenceParams) -> Result<()> {
         _ => 5, // yearly
     };
     win::put_property(&pattern, "RecurrenceType", VARIANT::from(kind))?;
+    if kind == 1 {
+        // Explicit, so the series runs on the weekday the approval prompt names.
+        win::put_property(
+            &pattern,
+            "DaysOfWeekMask",
+            VARIANT::from(crate::contracts::weekday_mask(start)),
+        )?;
+    }
     win::put_property(
         &pattern,
         "Interval",
@@ -162,7 +174,7 @@ pub(super) fn create_event(
         )?;
     }
     if let Some(spec) = &params.recurrence {
-        apply_recurrence(&event, spec)?;
+        apply_recurrence(&event, spec, &start)?;
     }
     save(&event)?;
     let store = default_folder(namespace, OL_FOLDER_CALENDAR)

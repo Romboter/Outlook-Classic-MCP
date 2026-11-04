@@ -254,6 +254,56 @@ pub(super) fn list_events(namespace: &IDispatch, params: ListEventsParams) -> Re
     )
 }
 
+/// Hosts whose https links are accepted as meeting joins: exact or a subdomain.
+const JOIN_HOSTS: [&str; 6] = [
+    "teams.microsoft.com",
+    "teams.live.com",
+    "meet.google.com",
+    "zoom.us",
+    "zoomgov.com",
+    "webex.com",
+];
+const MAX_LINK_CHARS: usize = 500;
+
+fn is_join_host(host: &str) -> bool {
+    JOIN_HOSTS
+        .iter()
+        .any(|h| host == *h || host.strip_suffix(h).is_some_and(|p| p.ends_with('.')))
+}
+
+/// The first Teams/Zoom/Meet/Webex https join link in `body`, or None. Pure
+/// text matching: the host must be on the list exactly (or a subdomain of a
+/// listed domain), with no userinfo and a non-empty path.
+pub(super) fn extract_join_link(body: &str) -> Option<String> {
+    let lower = body.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(at) = lower[from..].find("https://") {
+        let begin = from + at;
+        from = begin + "https://".len();
+        let rest = &body[begin..];
+        let end = rest
+            .find(|c: char| c.is_whitespace() || "<>\"'()[]{}|^`".contains(c) || c.is_control())
+            .unwrap_or(rest.len());
+        let url = rest[..end].trim_end_matches(['.', ',', ';', ':', '!', '?']);
+        if url.len() > MAX_LINK_CHARS {
+            continue;
+        }
+        let after = &url["https://".len()..];
+        let authority_end = after.find(['/', '?', '#']).unwrap_or(after.len());
+        let (authority, path) = after.split_at(authority_end);
+        let host = authority.strip_suffix(":443").unwrap_or(authority);
+        let host = host.to_ascii_lowercase();
+        let clean_host = !host.is_empty()
+            && host
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+        if clean_host && is_join_host(&host) && path.len() > 1 && path.starts_with('/') {
+            return Some(url.to_string());
+        }
+    }
+    None
+}
+
 pub(super) fn get_event(namespace: &IDispatch, params: GetEventParams) -> Result<Value> {
     let mut args = vec![VARIANT::from(params.entry_id.as_str())];
     if let Some(ref store) = params.store_id {
@@ -282,8 +332,17 @@ pub(super) fn get_event(namespace: &IDispatch, params: GetEventParams) -> Result
         }
     }
     let body_limit = params.max_body_chars.unwrap_or(BODY_CHARS as u32) as usize;
-    let (body, body_truncated) = capped(optional_text(&event, "Body"), body_limit);
+    let raw_body = optional_text(&event, "Body");
+    let join_link = extract_join_link(&raw_body);
+    let (body, body_truncated) = capped(raw_body, body_limit);
     let object = data.as_object_mut().context("invalid event result")?;
+    // Classic's object model has no verified online-meeting property, so the
+    // link only ever comes from the (untrusted) body. Never fetched or logged.
+    object.insert("online_meeting_link".into(), json!(join_link));
+    object.insert(
+        "online_meeting_link_source".into(),
+        json!(join_link.as_ref().map(|_| "body")),
+    );
     object.insert("body".into(), json!(body));
     object.insert("body_truncated".into(), json!(body_truncated));
     object.insert("attendees".into(), json!(attendees));
@@ -375,4 +434,56 @@ pub(super) fn list_tasks(namespace: &IDispatch, params: ListTasksParams) -> Resu
     }
     Ok(json!({"count": rows.len(), "has_more": has_more,
         "scan_truncated": scan_truncated, "items": rows}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_join_link;
+
+    #[test]
+    fn finds_join_links_on_known_hosts() {
+        let teams = "Join: https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc/0?context=x";
+        assert_eq!(
+            extract_join_link(teams).as_deref(),
+            Some("https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc/0?context=x")
+        );
+        assert_eq!(
+            extract_join_link("<https://us02web.zoom.us/j/123456789?pwd=abc>.").as_deref(),
+            Some("https://us02web.zoom.us/j/123456789?pwd=abc")
+        );
+        assert_eq!(
+            extract_join_link("Meet: https://meet.google.com/abc-defg-hij, see you").as_deref(),
+            Some("https://meet.google.com/abc-defg-hij")
+        );
+        assert_eq!(
+            extract_join_link("https://acme.webex.com/meet/jane").as_deref(),
+            Some("https://acme.webex.com/meet/jane")
+        );
+        // The first acceptable link wins, skipping unrelated ones.
+        assert_eq!(
+            extract_join_link("see https://example.org/a then HTTPS://TEAMS.LIVE.COM/meet/9")
+                .as_deref(),
+            Some("HTTPS://TEAMS.LIVE.COM/meet/9")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_and_look_alike_links() {
+        for body in [
+            "",
+            "no link here",
+            "http://teams.microsoft.com/l/meetup-join/x",
+            "https://teams.microsoft.com.evil.example/l/meetup-join/x",
+            "https://evilteams.microsoft.com.example/x",
+            "https://evilzoom.us/j/1",
+            "https://zoom.us.evil.example/j/1",
+            "https://teams.microsoft.com@evil.example/l/x",
+            "https://evil.example/?u=https://teams.microsoft.com",
+            "https://teams.microsoft.com",
+            "https://teams.microsoft.com/",
+            "https://teams.microsoft.com:8443/l/x",
+        ] {
+            assert_eq!(extract_join_link(body), None, "{body}");
+        }
+    }
 }

@@ -25,13 +25,14 @@ use approval::{ApprovalMode, Backend};
 use contracts::{
     CheckActionParams, CheckSendParams, CompleteTaskParams, CreateEventParams, CreateFolderParams,
     CreateTaskParams, DeleteItemParams, FolderParams, ForwardMailParams, GetContactParams,
-    GetEventParams, GetMailParams, ListContactsParams, ListEventsParams, ListMailsParams,
-    ListTasksParams, MailCommand, MarkMailParams, MoveMailParams, ReplyMailParams,
+    GetEventParams, GetMailParams, GetTaskParams, ListContactsParams, ListEventsParams,
+    ListMailsParams, ListTasksParams, MailCommand, MarkMailParams, MoveMailParams, ReplyMailParams,
     ResolveNameParams, RespondEventParams, SaveAttachmentsParams, SearchContactsParams,
     SearchMailsParams, SendDraftParams, SendMailParams, SetCategoryParams, ThreadParams,
-    ToggleRuleParams, UpdateEventParams, checked_send_id, prepare_cancel_meeting, prepare_delete,
-    prepare_forward_mail, prepare_invite_meeting, prepare_reply_mail, prepare_respond_event,
-    prepare_save_attachments, prepare_send_mail, prepare_toggle_rule, prepare_update_meeting,
+    ToggleRuleParams, UpdateEventParams, UpdateTaskParams, checked_send_id, prepare_cancel_meeting,
+    prepare_delete, prepare_forward_mail, prepare_invite_meeting, prepare_reply_mail,
+    prepare_respond_event, prepare_save_attachments, prepare_send_mail, prepare_toggle_rule,
+    prepare_update_meeting,
 };
 use outlook::OutlookBridge;
 use policy::{Capability, Policy};
@@ -581,7 +582,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "List calendar events in a bounded local-time window (default now to +14 days; limit default 50, max 200). Recurring series are expanded by default. Pass local ISO-8601 times or times with a UTC offset (converted to local); results carry the local offset. entry_id is a short session handle.",
+        description = "List calendar events in a bounded local-time window (default now to +14 days; limit default 50, max 200). Optional `calendar` names another calendar folder (same spec as the mail folder parameter, e.g. a shared mailbox or `<store>/Calendar`); default is your own calendar. Recurring series are expanded by default. Pass local ISO-8601 times or times with a UTC offset (converted to local); results carry the local offset. entry_id is a short session handle.",
         meta = ui::tool_meta("calendar")
     )]
     async fn outlook_list_events(
@@ -599,6 +600,16 @@ impl OutlookMcp {
         Parameters(params): Parameters<GetEventParams>,
     ) -> CallToolResult {
         self.call(MailCommand::GetEvent(params)).await
+    }
+
+    #[tool(
+        description = "Read one task by handle from list_tasks (or raw EntryID): subject, dates, importance, status, percent_complete, reminder, categories and the notes body. Body capped at 4000 characters by default (max_body_chars up to 50000; body_truncated)."
+    )]
+    async fn outlook_get_task(
+        &self,
+        Parameters(params): Parameters<GetTaskParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::GetTask(params)).await
     }
 
     #[tool(
@@ -835,7 +846,23 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Create a calendar event. Without attendees it is on your own calendar only (events permission, server mode full). With `attendees` (plain email addresses) it is a meeting: invitations are emailed only after the user approves a prompt listing every attendee (outside-organization ones marked), and it needs send permission; a recurring meeting (recurrence) is allowed and the prompt states the pattern in words; online meetings are not supported yet. Nothing is created if the prompt is declined or the client cannot show it. Times are local ISO-8601 or carry a UTC offset.",
+        description = "Change a task by handle from list_tasks: subject, due_date, body, importance, percent_complete or status (not both), reminder. Requires modify permission (server mode full). Reads the task back and reports the stored values; notifies nobody.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn outlook_update_task(
+        &self,
+        Parameters(params): Parameters<UpdateTaskParams>,
+    ) -> CallToolResult {
+        self.call(MailCommand::UpdateTask(params)).await
+    }
+
+    #[tool(
+        description = "Create a calendar event. Without attendees it is on your own calendar only (events permission, server mode full). With `attendees` (plain email addresses) it is a meeting: invitations are emailed only after the user approves a prompt listing every attendee (outside-organization ones marked), and it needs send permission; a recurring meeting (recurrence) is allowed and the prompt states the pattern in words; online meetings are not supported yet. Nothing is created if the prompt is declined or the client cannot show it. Times are local ISO-8601 or carry a UTC offset. Optional `calendar` (same spec as the mail folder parameter) creates the event in another calendar folder you can write to; it is refused together with attendees.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1053,8 +1080,71 @@ impl OutlookMcp {
 
 const INSTRUCTIONS: &str = "Experimental Outlook Classic MCP; read-only unless the user started the server in a wider permission mode (see outlook_rust_status). Requires locally running Outlook Classic on Windows. Writes (send, delete, rules, meeting changes) need the server in a wider mode and a person approving a prompt; see outlook_rust_status. No OST parsing. Search/list results contain short session-scoped entry_id handles instead of raw COM IDs; fetch a selected message with outlook_get_mail. Responses are compact JSON. Do not claim this build has passed live Outlook testing.";
 
+/// Capabilities that make a tool useful: it is listed when the policy allows ANY of
+/// them. Reads are always listed. Listing is only a token saving; every call is still
+/// checked by the policy, so a missing entry fails open (listed) and stays gated.
+const TOOL_CAPS: &[(&str, &[Capability])] = &[
+    ("outlook_mark_mail", &[Capability::Modify]),
+    ("outlook_set_category", &[Capability::Modify]),
+    ("outlook_create_folder", &[Capability::Modify]),
+    ("outlook_move_mail", &[Capability::Modify]),
+    ("outlook_create_task", &[Capability::Modify]),
+    ("outlook_complete_task", &[Capability::Modify]),
+    ("outlook_update_task", &[Capability::Modify]),
+    // send/reply/forward save a draft when sending is not allowed.
+    ("outlook_send_mail", &[Capability::Send, Capability::Draft]),
+    ("outlook_reply_mail", &[Capability::Send, Capability::Draft]),
+    (
+        "outlook_forward_mail",
+        &[Capability::Send, Capability::Draft],
+    ),
+    ("outlook_send_draft", &[Capability::Send]),
+    ("outlook_create_event", &[Capability::Events]),
+    ("outlook_update_event", &[Capability::Events]),
+    ("outlook_update_meeting", &[Capability::Send]),
+    ("outlook_cancel_meeting", &[Capability::Send]),
+    (
+        "outlook_respond_event",
+        &[Capability::Events, Capability::Send],
+    ),
+    ("outlook_delete_mail", &[Capability::Delete]),
+    ("outlook_delete_event", &[Capability::Delete]),
+    ("outlook_toggle_rule", &[Capability::Rules]),
+    ("outlook_save_attachments", &[Capability::Files]),
+];
+
+/// Whether `list_tools` should show this tool under `policy`.
+pub fn tool_visible(policy: &Policy, name: &str) -> bool {
+    TOOL_CAPS
+        .iter()
+        .find(|(tool, _)| *tool == name)
+        .is_none_or(|(_, caps)| caps.iter().any(|cap| policy.allows(*cap)))
+}
+
 #[tool_handler]
 impl ServerHandler for OutlookMcp {
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        context: rmcp::service::RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
+        Ok(rmcp::model::ListToolsResult {
+            result_type: Some(rmcp::model::ResultType::COMPLETE),
+            tools: Self::tool_router()
+                .list_all()
+                .into_iter()
+                .filter(|tool| tool_visible(&self.policy, tool.name.as_ref()))
+                .collect(),
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(rmcp::model::CacheScope::Public),
+        })
+    }
+
     fn get_info(&self) -> rmcp::model::ServerConfig {
         rmcp::model::ServerConfig::new(
             rmcp::model::ServerCapabilities::builder()
@@ -1134,6 +1224,84 @@ mod tests {
     }
 
     #[test]
+    fn write_tools_are_hidden_when_the_mode_cannot_run_them() {
+        let policy =
+            |mode: &str, deny: Option<&str>| Policy::from_settings(Some(mode), deny).unwrap();
+        let names: Vec<String> = OutlookMcp::tool_router()
+            .list_all()
+            .iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        let shown = |p: &Policy| -> Vec<&str> {
+            names
+                .iter()
+                .map(String::as_str)
+                .filter(|n| tool_visible(p, n))
+                .collect()
+        };
+        // Every registered write tool needs an explicit entry; reads need none.
+        let read_only = shown(&policy("read-only", None));
+        for (tool, _) in TOOL_CAPS {
+            assert!(!read_only.contains(tool), "{tool} visible in read-only");
+        }
+        for read in [
+            "outlook_list_mails",
+            "outlook_check_send",
+            "outlook_check_action",
+            "outlook_rust_status",
+        ] {
+            assert!(read_only.contains(&read), "{read} must stay visible");
+        }
+        // Draft mode keeps send/reply/forward (they save drafts) but not real sends or deletes.
+        let draft = shown(&policy("draft", None));
+        assert!(draft.contains(&"outlook_send_mail") && draft.contains(&"outlook_reply_mail"));
+        assert!(!draft.contains(&"outlook_send_draft") && !draft.contains(&"outlook_delete_mail"));
+        assert!(!draft.contains(&"outlook_mark_mail"));
+        // Full shows everything; a denied capability hides what only it unlocks.
+        assert_eq!(shown(&policy("full", None)).len(), names.len());
+        let no_delete = shown(&policy("full", Some("delete")));
+        assert!(
+            !no_delete.contains(&"outlook_delete_mail") && no_delete.contains(&"outlook_mark_mail")
+        );
+        // Unlisted names fail open: still listed, still gated at call time.
+        assert!(tool_visible(&Policy::read_only(), "outlook_future_tool"));
+    }
+
+    #[test]
+    fn every_registered_non_read_tool_is_in_the_visibility_table() {
+        // Read-only tools are the ones the read-only policy runs; anything else must be mapped.
+        let read_only_tools = [
+            "outlook_rust_status",
+            "outlook_whoami",
+            "outlook_list_folders",
+            "outlook_list_mails",
+            "outlook_search_mails",
+            "outlook_get_mail",
+            "outlook_get_thread",
+            "outlook_list_contacts",
+            "outlook_search_contacts",
+            "outlook_get_contact",
+            "outlook_resolve_name",
+            "outlook_list_events",
+            "outlook_get_event",
+            "outlook_list_tasks",
+            "outlook_get_task",
+            "outlook_check_send",
+            "outlook_check_action",
+            "outlook_list_categories",
+            "outlook_list_rules",
+            "outlook_get_out_of_office",
+        ];
+        for tool in OutlookMcp::tool_router().list_all() {
+            let name = tool.name.as_ref();
+            assert!(
+                read_only_tools.contains(&name) || TOOL_CAPS.iter().any(|(t, _)| *t == name),
+                "{name} is neither a known read tool nor in TOOL_CAPS"
+            );
+        }
+    }
+
+    #[test]
     fn delivery_follows_the_permission_mode() {
         let policy = |mode: &str| Policy::from_settings(Some(mode), None).unwrap();
         assert_eq!(delivery_for(&policy("full"), false), Ok(Delivery::Send));
@@ -1161,7 +1329,7 @@ mod tests {
     fn registered_tools_exclude_not_yet_implemented_writes() {
         let router = OutlookMcp::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 38);
+        assert_eq!(tools.len(), 40);
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         for expected in [
             "outlook_whoami",
@@ -1179,6 +1347,7 @@ mod tests {
             "outlook_get_out_of_office",
             "outlook_list_events",
             "outlook_get_event",
+            "outlook_get_task",
             "outlook_list_tasks",
             "outlook_mark_mail",
             "outlook_set_category",
@@ -1191,6 +1360,7 @@ mod tests {
             "outlook_check_send",
             "outlook_create_task",
             "outlook_complete_task",
+            "outlook_update_task",
             "outlook_create_event",
             "outlook_update_event",
             "outlook_delete_mail",

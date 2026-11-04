@@ -2,11 +2,12 @@
 //! create/complete a task, create/update an appointment on the user's own
 //! calendar. Inviting attendees, responding to invitations and deleting
 //! events need the confirmation workflow and are not here.
-use super::mailbox::{bool_property, default_folder, optional_text};
-use super::schedule::{date_iso, date_variant, resolve_bound};
+use super::mailbox::{bool_property, calendar_folder, default_folder, optional_text};
+use super::schedule::{date_iso, date_variant, resolve_bound, task_fields};
 use super::win;
 use crate::contracts::{
     CompleteTaskParams, CreateEventParams, CreateTaskParams, RecurrenceParams, UpdateEventParams,
+    UpdateTaskParams,
 };
 use crate::localtime::LocalTime;
 use anyhow::{Context, Result, bail};
@@ -18,7 +19,6 @@ use windows::Win32::System::{
 
 const OL_APPOINTMENT_ITEM: i32 = 1;
 const OL_TASK_ITEM: i32 = 3;
-const OL_FOLDER_CALENDAR: i32 = 9;
 const OL_FOLDER_TASKS: i32 = 13;
 const OL_CLASS_APPOINTMENT: i32 = 26;
 const OL_CLASS_TASK: i32 = 48;
@@ -105,6 +105,53 @@ pub(super) fn complete_task(namespace: &IDispatch, params: CompleteTaskParams) -
     }))
 }
 
+pub(super) fn update_task(namespace: &IDispatch, params: UpdateTaskParams) -> Result<Value> {
+    let task = item_by_id(namespace, &params.entry_id, params.store_id.as_deref())?;
+    if win::int_property(&task, "Class").ok() != Some(OL_CLASS_TASK) {
+        bail!("EntryID does not identify a task");
+    }
+    if let Some(subject) = &params.subject {
+        put_text(&task, "Subject", subject)?;
+    }
+    if let Some(due) = &params.due_date {
+        put_date(&task, "DueDate", due)?;
+    }
+    if let Some(body) = &params.body {
+        put_text(&task, "Body", body)?;
+    }
+    if let Some(level) = &params.importance {
+        win::put_property(&task, "Importance", VARIANT::from(importance(level)))?;
+    }
+    if let Some(percent) = params.percent_complete {
+        win::put_property(&task, "PercentComplete", VARIANT::from(percent as i32))?;
+    }
+    if let Some(status) = &params.status {
+        // OlTaskStatus: 0 not started, 1 in progress, 2 complete, 3 waiting, 4 deferred.
+        let code = crate::contracts::TASK_STATUSES
+            .iter()
+            .position(|s| s.eq_ignore_ascii_case(status))
+            .context("unknown status")? as i32;
+        win::put_property(&task, "Status", VARIANT::from(code))?;
+    }
+    if let Some(reminder) = &params.reminder {
+        win::put_property(&task, "ReminderSet", VARIANT::from(true))?;
+        put_date(&task, "ReminderTime", reminder)?;
+    }
+    save(&task)?;
+    let mut data = task_fields(&task);
+    let object = data.as_object_mut().context("invalid task result")?;
+    // `status` reports the write; the task's own OlTaskStatus moves to `task_status`.
+    let task_status = object.remove("status").unwrap_or(Value::Null);
+    object.insert("task_status".into(), task_status);
+    object.insert("status".into(), json!("updated"));
+    object.insert("entry_id".into(), json!(optional_text(&task, "EntryID")));
+    object.insert(
+        "store_id".into(),
+        json!(params.store_id.clone().unwrap_or_default()),
+    );
+    Ok(data)
+}
+
 pub(super) fn apply_recurrence(
     event: &IDispatch,
     spec: &RecurrenceParams,
@@ -150,11 +197,19 @@ pub(super) fn create_event(
     if end.minutes() <= start.minutes() {
         bail!("end must be after start");
     }
-    let event = win::method_object(
-        application,
-        "CreateItem",
-        vec![VARIANT::from(OL_APPOINTMENT_ITEM)],
-    )?;
+    let calendar = calendar_folder(namespace, params.calendar.as_deref())?;
+    // A named calendar gets the item through its own Items collection, so it is
+    // saved there; the default calendar keeps the plain CreateItem path.
+    let event = if params.calendar.is_some() {
+        let items = win::object_property(&calendar, "Items")?;
+        win::method_object(&items, "Add", vec![VARIANT::from(OL_APPOINTMENT_ITEM)])?
+    } else {
+        win::method_object(
+            application,
+            "CreateItem",
+            vec![VARIANT::from(OL_APPOINTMENT_ITEM)],
+        )?
+    };
     put_text(&event, "Subject", &params.subject)?;
     win::put_property(&event, "Start", date_variant(&start)?)?;
     win::put_property(&event, "End", date_variant(&end)?)?;
@@ -177,9 +232,7 @@ pub(super) fn create_event(
         apply_recurrence(&event, spec, &start)?;
     }
     save(&event)?;
-    let store = default_folder(namespace, OL_FOLDER_CALENDAR)
-        .map(|f| optional_text(&f, "StoreID"))
-        .unwrap_or_default();
+    let store = optional_text(&calendar, "StoreID");
     Ok(json!({
         "status": "created",
         "entry_id": optional_text(&event, "EntryID"),

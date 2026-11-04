@@ -2,9 +2,11 @@
 //!
 //! Dates are Outlook local wall-clock values rendered as ISO-8601 without an
 //! offset. Every call is bounded by a result limit, a scan cap and a deadline.
-use super::mailbox::{bool_property, default_folder, optional_text};
+use super::mailbox::{bool_property, calendar_folder, default_folder, optional_text};
 use super::win;
-use crate::contracts::{GetEventParams, ListEventsParams, ListTasksParams, checked_limit_in};
+use crate::contracts::{
+    GetEventParams, GetTaskParams, ListEventsParams, ListTasksParams, checked_limit_in,
+};
 use crate::localtime::LocalTime;
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -25,7 +27,6 @@ use windows::Win32::{
     },
 };
 
-const OL_FOLDER_CALENDAR: i32 = 9;
 const OL_FOLDER_TASKS: i32 = 13;
 const OL_CLASS_APPOINTMENT: i32 = 26;
 const OL_CLASS_TASK: i32 = 48;
@@ -208,7 +209,7 @@ pub(super) fn list_events(namespace: &IDispatch, params: ListEventsParams) -> Re
         bail!("end must be after start");
     }
 
-    let calendar = default_folder(namespace, OL_FOLDER_CALENDAR)?;
+    let calendar = calendar_folder(namespace, params.calendar.as_deref())?;
     let store_id = optional_text(&calendar, "StoreID");
     let items = win::object_property(&calendar, "Items")?;
     // Outlook needs the collection sorted by [Start] BEFORE IncludeRecurrences
@@ -383,6 +384,46 @@ pub(super) fn get_event(namespace: &IDispatch, params: GetEventParams) -> Result
             }),
         );
     }
+    Ok(data)
+}
+
+/// Stored values of a task, shared by get_task and the update read-back.
+pub(super) fn task_fields(task: &IDispatch) -> Value {
+    json!({
+        "subject": optional_text(task, "Subject"),
+        "due_date": date_iso(task, "DueDate"),
+        "start_date": date_iso(task, "StartDate"),
+        "complete": bool_property(task, "Complete"),
+        "percent_complete": win::int_property(task, "PercentComplete").unwrap_or(0),
+        "importance": win::int_property(task, "Importance").ok(),
+        "status": win::int_property(task, "Status").ok(),
+        "reminder_set": bool_property(task, "ReminderSet"),
+        "reminder_time": date_iso(task, "ReminderTime"),
+        "categories": optional_text(task, "Categories"),
+    })
+}
+
+pub(super) fn get_task(namespace: &IDispatch, params: GetTaskParams) -> Result<Value> {
+    let mut args = vec![VARIANT::from(params.entry_id.as_str())];
+    if let Some(ref store) = params.store_id {
+        args.push(VARIANT::from(store.as_str()));
+    }
+    let task = win::method_object(namespace, "GetItemFromID", args)
+        .context("Task no longer available; EntryID may be stale")?;
+    if win::int_property(&task, "Class").ok() != Some(OL_CLASS_TASK) {
+        bail!("EntryID does not identify a task");
+    }
+    let mut data = task_fields(&task);
+    let body_limit = params.max_body_chars.unwrap_or(BODY_CHARS as u32) as usize;
+    let (body, body_truncated) = capped(optional_text(&task, "Body"), body_limit);
+    let object = data.as_object_mut().context("invalid task result")?;
+    object.insert("entry_id".into(), json!(optional_text(&task, "EntryID")));
+    object.insert(
+        "store_id".into(),
+        json!(params.store_id.clone().unwrap_or_default()),
+    );
+    object.insert("body".into(), json!(body));
+    object.insert("body_truncated".into(), json!(body_truncated));
     Ok(data)
 }
 

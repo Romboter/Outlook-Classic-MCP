@@ -10,7 +10,7 @@
 | Table backend, indexed `AdvancedSearch`: #5 | In `rust/development` | Table is the default. Indexed is opt-in; in one test it returned the same results but took 10,968 ms vs 3,033 ms legacy. Do not change the auto backend without repeatable evidence |
 | Short handles: #6 | In `rust/development` | Session-scoped identity references, not search ranks. Cross-store and reconnect cases untested |
 | Permission modes, confirmed writes: #8 | In `rust/development` | Server-enforced `read-only` / `draft` / `full` modes and a person's approval for every write (MCP elicitation, or a native dialog by default per `OUTLOOK_MCP_APPROVAL`). Verified with scripts standing in for the person; **no real person has answered a real elicitation prompt**. Failure and timeout paths during `Send()`, `Delete()`, rule `Save()` and `Respond()` are fake-tested only |
-| 31-tool Python parity: #9 | All 31 Python names registered (38 tools in total) | Remaining differences are ranked in [PARITY-GAPS.md](PARITY-GAPS.md). `outlook_respond_event` accept/tentative/decline has never run against a real invitation from someone else |
+| 31-tool Python parity: #9 | All 31 Python names registered (40 tools in total) | Remaining differences are ranked in [PARITY-GAPS.md](PARITY-GAPS.md). `outlook_respond_event` accept/tentative/decline has never run against a real invitation from someone else |
 | MCP Apps views: #10 | Five `ui://outlook/*.html` views linked from the matching tools | Calendar view rendering was recorded; rendering of the other four is not recorded here |
 | Windows distributable and release: #11 | CI groundwork only | No release artifact, signing, cutover or rollback validation |
 

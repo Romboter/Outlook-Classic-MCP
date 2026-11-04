@@ -132,6 +132,8 @@ pub struct ListEventsParams {
     pub limit: Option<u32>,
     /// Expand recurring series into occurrences (default true).
     pub include_recurrences: Option<bool>,
+    /// Calendar folder: same spec as the mail `folder` parameter (alias, `<store>/Path` prefix or path). Must hold appointments. Defaults to your own calendar.
+    pub calendar: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -142,6 +144,36 @@ pub struct GetEventParams {
     pub store_id: Option<String>,
     /// Body character budget (default 4000, maximum 50000).
     pub max_body_chars: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct GetTaskParams {
+    /// Short handle from list_tasks (e.g. m1), or a raw Outlook EntryID.
+    pub entry_id: String,
+    /// StoreID for raw identifiers in non-default stores.
+    pub store_id: Option<String>,
+    /// Body character budget (default 4000, maximum 50000).
+    pub max_body_chars: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct UpdateTaskParams {
+    /// Short handle from list_tasks, or a raw Outlook EntryID.
+    pub entry_id: String,
+    pub store_id: Option<String>,
+    pub subject: Option<String>,
+    /// Due date, local ISO-8601 (2026-05-01) or with an offset.
+    pub due_date: Option<String>,
+    /// Replaces the task notes.
+    pub body: Option<String>,
+    /// low, normal or high.
+    pub importance: Option<String>,
+    /// 0..100. 100 marks the task complete.
+    pub percent_complete: Option<u32>,
+    /// not_started, in_progress, complete, waiting or deferred. Not combinable with percent_complete.
+    pub status: Option<String>,
+    /// Reminder time, local ISO-8601 or with an offset (turns the reminder on).
+    pub reminder: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -417,6 +449,8 @@ pub struct CreateEventParams {
     /// Create the event with no reminder (default false). Cannot be combined with reminder_minutes.
     pub no_reminder: Option<bool>,
     pub recurrence: Option<RecurrenceParams>,
+    /// Calendar folder to create the event in: same spec as the mail `folder` parameter. Must hold appointments. Defaults to your own calendar. Not allowed together with attendees.
+    pub calendar: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -472,8 +506,74 @@ pub fn validate_create_task(x: &CreateTaskParams) -> Result<(), String> {
     Ok(())
 }
 
+/// A `calendar` folder spec: present means non-blank, one line, at most 300 characters.
+pub fn validate_calendar_spec(spec: Option<&str>) -> Result<(), String> {
+    if let Some(spec) = spec
+        && (spec.trim().is_empty()
+            || spec.chars().count() > 300
+            || spec.chars().any(char::is_control))
+    {
+        return Err("calendar must be 1..300 characters on one line".into());
+    }
+    Ok(())
+}
+
+pub const TASK_STATUSES: [&str; 5] = [
+    "not_started",
+    "in_progress",
+    "complete",
+    "waiting",
+    "deferred",
+];
+
+pub fn validate_update_task(x: &UpdateTaskParams) -> Result<(), String> {
+    checked_id(&x.entry_id, x.store_id.as_deref())?;
+    if let Some(subject) = &x.subject {
+        checked_title(subject, "subject")?;
+    }
+    checked_free_text(x.body.as_deref().unwrap_or(""), "body", 100_000)?;
+    if let Some(level) = &x.importance
+        && !matches!(
+            level.to_ascii_lowercase().as_str(),
+            "low" | "normal" | "high"
+        )
+    {
+        return Err("importance must be low, normal or high".into());
+    }
+    for (value, what) in [(&x.due_date, "due_date"), (&x.reminder, "reminder")] {
+        if let Some(text) = value {
+            LocalTime::parse_with_offset(text).map_err(|e| format!("{what}: {e}"))?;
+        }
+    }
+    if x.percent_complete.is_some_and(|p| p > 100) {
+        return Err("percent_complete must be 0..100".into());
+    }
+    if let Some(status) = &x.status
+        && !TASK_STATUSES.contains(&status.to_ascii_lowercase().as_str())
+    {
+        return Err(
+            "status must be not_started, in_progress, complete, waiting or deferred".into(),
+        );
+    }
+    if x.percent_complete.is_some() && x.status.is_some() {
+        return Err("give percent_complete or status, not both".into());
+    }
+    if x.subject.is_none()
+        && x.due_date.is_none()
+        && x.body.is_none()
+        && x.importance.is_none()
+        && x.percent_complete.is_none()
+        && x.status.is_none()
+        && x.reminder.is_none()
+    {
+        return Err("nothing to change; give at least one field to update".into());
+    }
+    Ok(())
+}
+
 pub fn validate_create_event(x: &CreateEventParams) -> Result<(), String> {
     checked_title(&x.subject, "subject")?;
+    validate_calendar_spec(x.calendar.as_deref())?;
     if x.attendees.as_ref().is_some_and(|a| !a.is_empty()) {
         return Err(
             "inviting attendees sends mail and is not supported yet; create the event without attendees"
@@ -680,6 +780,12 @@ pub fn describe_recurrence(r: &RecurrenceParams, start: &LocalTime) -> String {
 }
 
 pub fn prepare_invite_meeting(x: &CreateEventParams) -> Result<ActionTarget, String> {
+    if x.calendar.is_some() {
+        return Err(
+            "meetings with attendees can only be created on your own default calendar; omit calendar or omit attendees"
+                .into(),
+        );
+    }
     let attendees = checked_attendees(x.attendees.as_deref().unwrap_or(&[]))?;
     let mut plain = x.clone();
     plain.attendees = None;
@@ -823,6 +929,7 @@ pub enum MailCommand {
     },
     CreateTask(CreateTaskParams),
     CompleteTask(CompleteTaskParams),
+    UpdateTask(UpdateTaskParams),
     CreateEvent(CreateEventParams),
     UpdateEvent(UpdateEventParams),
     /// Send pipeline steps on the Outlook worker; the pipeline itself is in `crate::send`.
@@ -839,6 +946,7 @@ pub enum MailCommand {
     MoveMail(MoveMailParams),
     ListEvents(ListEventsParams),
     GetEvent(GetEventParams),
+    GetTask(GetTaskParams),
     ListTasks(ListTasksParams),
     WhoAmI,
     ListContacts(ListContactsParams),
@@ -891,6 +999,7 @@ impl MailCommand {
             MailCommand::WhoAmI
             | MailCommand::ListEvents(_)
             | MailCommand::GetEvent(_)
+            | MailCommand::GetTask(_)
             | MailCommand::ListTasks(_)
             | MailCommand::ListContacts(_)
             | MailCommand::SearchContacts(_)
@@ -913,7 +1022,9 @@ impl MailCommand {
             MailCommand::ComposePrepare(_) => Capability::Draft,
             MailCommand::ComposeSend { .. } => Capability::Send,
             MailCommand::CreateEvent(_) | MailCommand::UpdateEvent(_) => Capability::Events,
-            MailCommand::CreateTask(_) | MailCommand::CompleteTask(_) => Capability::Modify,
+            MailCommand::CreateTask(_)
+            | MailCommand::CompleteTask(_)
+            | MailCommand::UpdateTask(_) => Capability::Modify,
             MailCommand::MarkMail(_)
             | MailCommand::SetCategory(_)
             | MailCommand::CreateFolder(_)
@@ -962,6 +1073,14 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         MailCommand::ComposeLocate(id) => checked_send_id(id),
         MailCommand::CreateTask(x) => validate_create_task(x),
         MailCommand::CompleteTask(x) => checked_id(&x.entry_id, x.store_id.as_deref()),
+        MailCommand::UpdateTask(x) => validate_update_task(x),
+        MailCommand::GetTask(x) => {
+            checked_id(&x.entry_id, x.store_id.as_deref())?;
+            if x.max_body_chars.unwrap_or(4000) > 50_000 {
+                return Err("max_body_chars must be <= 50000".into());
+            }
+            Ok(())
+        }
         MailCommand::CreateEvent(x) => validate_create_event(x),
         MailCommand::UpdateEvent(x) => validate_update_event(x),
         MailCommand::MarkMail(x) => {
@@ -1010,6 +1129,7 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
         }
         MailCommand::ListEvents(x) => {
             checked_limit_in(x.limit, 50, 200)?;
+            validate_calendar_spec(x.calendar.as_deref())?;
             let start = x
                 .start
                 .as_deref()
@@ -1360,6 +1480,7 @@ mod tests {
             is_online_meeting: None,
             reminder_minutes: None,
             no_reminder: None,
+            calendar: None,
             recurrence: None,
         };
         assert!(validate_create_event(&event()).is_ok());
@@ -1394,6 +1515,7 @@ mod tests {
             is_online_meeting: None,
             reminder_minutes: None,
             no_reminder: None,
+            calendar: None,
             recurrence: None,
         };
         let mut x = base();
@@ -1846,6 +1968,116 @@ mod tests {
     }
 
     #[test]
+    fn calendar_spec_is_validated_and_keeps_events_capability() {
+        assert!(validate_calendar_spec(None).is_ok());
+        assert!(validate_calendar_spec(Some("Archive/Calendar")).is_ok());
+        for bad in ["", "   ", "a\nb"] {
+            assert!(validate_calendar_spec(Some(bad)).is_err(), "{bad:?}");
+        }
+        assert!(validate_calendar_spec(Some(&"x".repeat(301))).is_err());
+        let mut event = CreateEventParams {
+            subject: "Review".into(),
+            start: "2026-05-01T09:00".into(),
+            end: "2026-05-01T10:00".into(),
+            location: None,
+            body: None,
+            attendees: None,
+            is_online_meeting: None,
+            reminder_minutes: None,
+            no_reminder: None,
+            calendar: Some("Shared/Calendar".into()),
+            recurrence: None,
+        };
+        assert!(validate_command(&MailCommand::CreateEvent(event.clone())).is_ok());
+        assert_eq!(
+            MailCommand::CreateEvent(event.clone()).capability(),
+            Capability::Events
+        );
+        event.calendar = Some(" ".into());
+        assert!(validate_command(&MailCommand::CreateEvent(event.clone())).is_err());
+        // Attendee meetings stay on the default calendar.
+        event.calendar = Some("Shared/Calendar".into());
+        event.attendees = Some(vec!["a@b.example".into()]);
+        assert!(
+            prepare_invite_meeting(&event)
+                .unwrap_err()
+                .contains("default calendar")
+        );
+        event.calendar = None;
+        assert!(prepare_invite_meeting(&event).is_ok());
+        let list = |calendar: Option<&str>| {
+            validate_command(&MailCommand::ListEvents(ListEventsParams {
+                start: None,
+                end: None,
+                limit: None,
+                include_recurrences: None,
+                calendar: calendar.map(Into::into),
+            }))
+        };
+        assert!(list(Some("Archive/Calendar")).is_ok());
+        assert!(list(Some("")).is_err());
+    }
+
+    #[test]
+    fn task_get_and_update_validate_and_map_capabilities() {
+        let get = |max| GetTaskParams {
+            entry_id: "m1".into(),
+            store_id: None,
+            max_body_chars: max,
+        };
+        assert!(validate_command(&MailCommand::GetTask(get(Some(50_000)))).is_ok());
+        assert!(validate_command(&MailCommand::GetTask(get(Some(50_001)))).is_err());
+        assert_eq!(
+            MailCommand::GetTask(get(None)).capability(),
+            Capability::Read
+        );
+        let update = || UpdateTaskParams {
+            entry_id: "m1".into(),
+            store_id: None,
+            subject: None,
+            due_date: None,
+            body: None,
+            importance: None,
+            percent_complete: None,
+            status: None,
+            reminder: None,
+        };
+        assert!(
+            validate_update_task(&update()).is_err(),
+            "nothing to change"
+        );
+        let mut x = update();
+        x.subject = Some("Pay invoice".into());
+        x.due_date = Some("2026-05-01".into());
+        x.importance = Some("High".into());
+        x.status = Some("In_Progress".into());
+        assert!(validate_update_task(&x).is_ok());
+        assert_eq!(
+            MailCommand::UpdateTask(x.clone()).capability(),
+            Capability::Modify
+        );
+        x.percent_complete = Some(50);
+        assert!(
+            validate_update_task(&x).is_err(),
+            "status and percent together"
+        );
+        let bad: [fn(&mut UpdateTaskParams); 6] = [
+            |x| x.subject = Some(" ".into()),
+            |x| x.due_date = Some("tomorrow".into()),
+            |x| x.importance = Some("urgent".into()),
+            |x| x.percent_complete = Some(101),
+            |x| x.status = Some("done".into()),
+            |x| x.entry_id = String::new(),
+        ];
+        for change in bad {
+            let mut y = update();
+            y.body = Some("notes".into());
+            change(&mut y);
+            assert!(validate_update_task(&y).is_err());
+        }
+    }
+
+    #[test]
     fn validates_event_and_task_commands() {
         let events = |start: Option<&str>, end: Option<&str>, limit| {
             validate_command(&MailCommand::ListEvents(ListEventsParams {
@@ -1853,6 +2085,7 @@ mod tests {
                 end: end.map(Into::into),
                 limit,
                 include_recurrences: None,
+                calendar: None,
             }))
         };
         assert!(events(None, None, None).is_ok());
@@ -1918,6 +2151,7 @@ mod tests {
             is_online_meeting: None,
             reminder_minutes: None,
             no_reminder: None,
+            calendar: None,
             recurrence: None,
         };
         let target = prepare_invite_meeting(&base()).unwrap();
@@ -1957,6 +2191,7 @@ mod tests {
             is_online_meeting: None,
             reminder_minutes: None,
             no_reminder: None,
+            calendar: None,
             recurrence: Some(RecurrenceParams {
                 kind: kind.into(),
                 interval: None,

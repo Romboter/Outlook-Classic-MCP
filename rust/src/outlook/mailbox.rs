@@ -53,6 +53,22 @@ pub(super) fn default_folder(namespace: &IDispatch, number: i32) -> Result<IDisp
     win::method_object(namespace, "GetDefaultFolder", vec![VARIANT::from(number)])
 }
 
+/// The calendar folder a `calendar` spec names (default calendar when absent).
+/// Uses the mail folder resolver, then refuses anything that is not an
+/// appointment folder (`DefaultItemType` olAppointmentItem = 1).
+pub(super) fn calendar_folder(namespace: &IDispatch, spec: Option<&str>) -> Result<IDispatch> {
+    const OL_FOLDER_CALENDAR: i32 = 9;
+    const OL_APPOINTMENT_ITEM: i32 = 1;
+    let Some(spec) = spec else {
+        return default_folder(namespace, OL_FOLDER_CALENDAR);
+    };
+    let folder = folder_path(namespace, Some(spec))?;
+    if win::int_property(&folder, "DefaultItemType").ok() != Some(OL_APPOINTMENT_ITEM) {
+        bail!("calendar does not name a calendar folder (it does not hold appointments)");
+    }
+    Ok(folder)
+}
+
 /// Well-known folder names (default store) to `OlDefaultFolders` numbers.
 fn default_folder_kind(path: &str) -> Option<i32> {
     match path.trim().to_lowercase().as_str() {
@@ -642,6 +658,16 @@ impl win::Session {
                 (params.entry_id, params.store_id) =
                     self.resolve_ids(&params.entry_id, &params.store_id)?;
                 schedule_write::complete_task(&self.namespace, params)
+            }
+            MailCommand::UpdateTask(mut params) => {
+                (params.entry_id, params.store_id) =
+                    self.resolve_ids(&params.entry_id, &params.store_id)?;
+                schedule_write::update_task(&self.namespace, params)
+            }
+            MailCommand::GetTask(mut params) => {
+                (params.entry_id, params.store_id) =
+                    self.resolve_ids(&params.entry_id, &params.store_id)?;
+                schedule::get_task(&self.namespace, params)
             }
             MailCommand::CreateEvent(params) => {
                 schedule_write::create_event(&self._application, &self.namespace, params)

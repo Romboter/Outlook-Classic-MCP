@@ -69,7 +69,7 @@ Enabling the `rmcp` `elicitation` feature added about 280 lines to `Cargo.lock` 
 
 ## Out of scope for the first version
 
-- Attachments (they need the path allowlist from `safe_path.rs` and a read-side check) and HTML bodies.
+- Attachments and HTML bodies were out of scope for the first version; they are now implemented (G13 to G15): paths checked by `safe_path.rs`, listed in the approval prompt and covered by the preview hash. Unit-tested only, not run live.
 - Meeting invitations and event responses. They reuse this pipeline: an event with attendees needs `send` and a confirmed preview, an event without attendees needs only `events`.
 - Auto-reply or rule changes.
 

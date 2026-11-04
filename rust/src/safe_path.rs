@@ -65,13 +65,109 @@ const EXECUTABLE: [&str; 28] = [
     "appref-ms",
 ];
 
+fn is_executable(name: &str) -> bool {
+    name.rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .is_some_and(|e| EXECUTABLE.contains(&e.as_str()))
+}
+
+/// Most files one outgoing message may carry.
+pub const MAX_ATTACH_FILES: usize = 10;
+/// Most bytes (all files together) one outgoing message may carry: 20 MiB.
+pub const MAX_ATTACH_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
+
+/// A file that passed the outgoing-attachment checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachFile {
+    /// Canonical path in the form Outlook's `Attachments.Add` accepts.
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+}
+
+/// Check every requested attachment path: inside an allowed root (after
+/// symlink resolution, so `..` and links cannot escape), an existing regular
+/// file, not an executable or script, and within the count and size caps.
+/// Each refusal names the file and gives the reason.
+pub fn resolve_attachment_files(
+    requested: &[String],
+    allowed_roots: &[PathBuf],
+) -> Result<Vec<AttachFile>, String> {
+    if requested.len() > MAX_ATTACH_FILES {
+        return Err(format!(
+            "too many attachments ({}); at most {MAX_ATTACH_FILES} are allowed",
+            requested.len()
+        ));
+    }
+    let roots: Vec<PathBuf> = allowed_roots
+        .iter()
+        .filter_map(|r| r.canonicalize().ok())
+        .collect();
+    let mut files: Vec<AttachFile> = Vec::new();
+    let mut total: u64 = 0;
+    for text in requested {
+        let shown: String = text.chars().take(80).collect();
+        if text.trim().is_empty() || text.chars().any(char::is_control) {
+            return Err("an attachment path is empty or contains control characters".into());
+        }
+        let given = Path::new(text);
+        if given
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(format!("{shown} was not attached: path traversal (..)"));
+        }
+        let real = given.canonicalize().map_err(|_| {
+            format!("{shown} was not attached: file does not exist or is not accessible")
+        })?;
+        let name = real
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !roots.iter().any(|root| real.starts_with(root)) {
+            return Err(format!(
+                "{name} was not attached: it is outside the allowed locations (your user profile)"
+            ));
+        }
+        let meta = std::fs::metadata(&real)
+            .map_err(|_| format!("{name} was not attached: file is not accessible"))?;
+        if !meta.is_file() {
+            return Err(format!("{name} was not attached: it is not a regular file"));
+        }
+        if let Err(why) = validate_filename(&name) {
+            return Err(format!("{name} was not attached: {why}"));
+        }
+        if is_executable(&name) {
+            return Err(format!(
+                "{name} was not attached: executable and script files can run code when opened"
+            ));
+        }
+        total = total.saturating_add(meta.len());
+        if total > MAX_ATTACH_TOTAL_BYTES {
+            return Err(format!(
+                "attachments are too large (limit {} MiB in total; {name} would exceed it)",
+                MAX_ATTACH_TOTAL_BYTES / (1024 * 1024)
+            ));
+        }
+        let path = plain_path(&real);
+        if files.iter().any(|f| f.path.eq_ignore_ascii_case(&path)) {
+            return Err(format!("{name} is listed more than once"));
+        }
+        files.push(AttachFile {
+            path,
+            name,
+            size: meta.len(),
+        });
+    }
+    Ok(files)
+}
+
 /// Why a file must not be saved, naming the file, or `None` when it may be.
 pub fn refusal_reason(name: &str) -> Option<String> {
     if let Err(why) = validate_filename(name) {
         return Some(format!("{name} was not saved: {why}"));
     }
-    let extension = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
-    if extension.is_some_and(|e| EXECUTABLE.contains(&e.as_str())) {
+    if is_executable(name) {
         return Some(format!(
             "{name} was not saved: executable and script files can run code when opened"
         ));
@@ -174,6 +270,61 @@ mod tests {
         for ok in ["report.pdf", "photo.jpeg", "notes", "exe.txt", "macro.docm"] {
             assert!(refusal_reason(ok).is_none(), "{ok}");
         }
+    }
+
+    #[test]
+    fn outgoing_attachments_are_checked_and_refused_by_name() {
+        let root = scratch("attach-root");
+        let outside = scratch("attach-outside");
+        let roots = vec![root.clone()];
+        let write = |dir: &Path, name: &str, len: usize| {
+            let p = dir.join(name);
+            std::fs::write(&p, vec![b'x'; len]).unwrap();
+            p.to_string_lossy().into_owned()
+        };
+        let ok = write(&root, "report.pdf", 10);
+        let got = resolve_attachment_files(std::slice::from_ref(&ok), &roots).unwrap();
+        assert_eq!((got[0].name.as_str(), got[0].size), ("report.pdf", 10));
+        assert!(!got[0].path.starts_with(r"\\?\"));
+        assert_eq!(resolve_attachment_files(&[], &roots).unwrap(), vec![]);
+
+        let exe = write(&root, "setup.exe", 1);
+        let e = resolve_attachment_files(&[exe], &roots).unwrap_err();
+        assert!(
+            e.starts_with("setup.exe was not attached") && e.contains("run code"),
+            "{e}"
+        );
+        let far = write(&outside, "a.txt", 1);
+        let e = resolve_attachment_files(&[far], &roots).unwrap_err();
+        assert!(e.contains("outside"), "{e}");
+        let e = resolve_attachment_files(&[format!("{}/../x.txt", root.display())], &roots)
+            .unwrap_err();
+        assert!(e.contains("traversal"), "{e}");
+        let missing = root.join("nope.txt").to_string_lossy().into_owned();
+        let e = resolve_attachment_files(&[missing], &roots).unwrap_err();
+        assert!(e.contains("does not exist"), "{e}");
+        let e = resolve_attachment_files(&[root.to_string_lossy().into()], &roots).unwrap_err();
+        assert!(e.contains("not a regular file"), "{e}");
+        let e = resolve_attachment_files(&[ok.clone(), ok.clone()], &roots).unwrap_err();
+        assert!(e.contains("more than once"), "{e}");
+        let e =
+            resolve_attachment_files(&vec![ok.clone(); MAX_ATTACH_FILES + 1], &roots).unwrap_err();
+        assert!(e.contains("too many"), "{e}");
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn outgoing_attachments_total_size_is_capped() {
+        let root = scratch("attach-size");
+        let big = root.join("big.bin");
+        let f = std::fs::File::create(&big).unwrap();
+        f.set_len(MAX_ATTACH_TOTAL_BYTES + 1).unwrap();
+        let e =
+            resolve_attachment_files(&[big.to_string_lossy().into()], std::slice::from_ref(&root))
+                .unwrap_err();
+        assert!(e.contains("too large") && e.contains("big.bin"), "{e}");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

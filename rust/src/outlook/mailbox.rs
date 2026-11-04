@@ -587,6 +587,19 @@ fn get_mail(namespace: &IDispatch, params: GetMailParams) -> Result<Value> {
         }
         object.insert("body_total_chars".into(), json!(total_chars));
     }
+    if params.include_html.unwrap_or(false) {
+        // Opt-in raw HTML source: text only, windowed like the plain body.
+        let html = optional_text(&item, "HTMLBody");
+        let total_chars = html.chars().count();
+        let offset = params.body_offset.unwrap_or(0) as usize;
+        object.insert(
+            "html_body".into(),
+            json!(html.chars().skip(offset).take(limit).collect::<String>()),
+        );
+        let end = offset.saturating_add(limit);
+        object.insert("html_truncated".into(), json!(total_chars > end));
+        object.insert("html_total_chars".into(), json!(total_chars));
+    }
     Ok(data)
 }
 

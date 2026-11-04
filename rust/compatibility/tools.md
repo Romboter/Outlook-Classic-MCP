@@ -29,9 +29,9 @@
 | `outlook_list_mails` | Mail | Read | `tools/mail.py` | #4 |
 | `outlook_search_mails` | Mail | Read | `tools/mail.py` | #4, #5 |
 | `outlook_get_mail` | Mail | Read | `tools/mail.py` | #4 |
-| `outlook_send_mail` | Mail | Write/send | `tools/mail.py` | #8, #9 |
-| `outlook_reply_mail` | Mail | Write/send | `tools/mail.py` | #8, #9 |
-| `outlook_forward_mail` | Mail | Write/send | `tools/mail.py` | #8, #9 |
+| `outlook_send_mail` | Mail | Write/send (`html`, `attachments` supported; unit-tested only) | `tools/mail.py` | #8, #9 |
+| `outlook_reply_mail` | Mail | Write/send (`html`, `attachments` supported; unit-tested only) | `tools/mail.py` | #8, #9 |
+| `outlook_forward_mail` | Mail | Write/send (`html` supported; unit-tested only) | `tools/mail.py` | #8, #9 |
 | `outlook_move_mail` | Mail | Write | `tools/mail.py` | #8, #9 |
 | `outlook_delete_mail` | Mail | Destructive | `tools/mail.py` | #8, #9 |
 | `outlook_mark_mail` | Mail | Write | `tools/mail.py` | #8, #9 |

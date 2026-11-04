@@ -23,7 +23,7 @@ Severity: **blocks** = blocks real daily use; **nice** = nice to have; **deliber
 
 Calendar and task reads are close to Python (G26 to G33 are mostly write-side or beyond-Python). Contacts, categories, rules and out-of-office reads match Python field for field.
 
-Counts: 31 true gaps (30 actionable plus G30, information only; IDs are stable and deliberately not contiguous), 20 deliberate deviations (D01 to D20), 12 untested-live items (U01 to U12).
+Counts: 29 true gaps (28 actionable plus G30, information only; IDs are stable and deliberately not contiguous), 22 deliberate deviations (D01 to D22; G16 and G17 reclassified as D21 and D22), 12 untested-live items (U01 to U12).
 
 ## 1. True gaps
 
@@ -46,18 +46,18 @@ Counts: 31 true gaps (30 actionable plus G30, information only; IDs are stable a
 | ID | Tool | Gap | Python behavior | Rust location | Severity | Size |
 | --- | --- | --- | --- | --- | --- | --- |
 | G05 | get_mail | **FIXED.** Was missing: `attachments[] {index, filename, size_bytes}`, `conversation_id`, `bcc`, `sent`, `flagged`, `importance`, `categories`. Present: summary fields plus `to`, `cc`, `body`, `body_truncated`, `body_total_chars`. | client/mail.py:78-123 | mailbox.rs:379-411 | blocks | S |
-| G09 | get_mail | `include_html=true` is rejected ("disabled in this read-only prototype"). Python returned `html_body`, opt-in. | client/mail.py:117-121, tools/mail.py:121-131 | contracts.rs:1046-1048, contracts.rs:55-66 | nice | M (needs a safety review) |
+| G09 | get_mail | **FIXED (unit-tested only, not run live).** `include_html=true` returns raw `html_body` (+`html_truncated`, `html_total_chars`) in the same `max_body_chars`/`body_offset` window; text only, never rendered. Was: `include_html=true` is rejected ("disabled in this read-only prototype"). Python returned `html_body`, opt-in. | client/mail.py:117-121, tools/mail.py:121-131 | contracts.rs:1046-1048, contracts.rs:55-66 | nice | M (needs a safety review) |
 | G10 | get_mail | **FIXED: `body_offset` and `body_next_offset` added; the per-call ceiling stays 12,000 and `max_body_chars=0` is still not offered.** Was: Rust body ceiling is 12,000 chars and `max_body_chars=0` (unlimited) is not offered. There is no offset or "next chunk" parameter, so the remainder is unreachable. `get_thread` is capped at 6,000 per message. | client/mail.py:104-111 (`0` means no limit, default 10000) | contracts.rs:1049-1051, mailbox.rs:392-404 | nice | S |
 
 ### Mail writes
 
 | ID | Tool | Gap | Python behavior | Rust location | Severity | Size |
 | --- | --- | --- | --- | --- | --- | --- |
-| G13 | send_mail | `attachments` rejected ("not supported yet"). Python attached validated paths under the user profile. | client/mail.py:264-311, utils/paths.py:38-60 | contracts.rs:199-202, 262-272, compose.rs:195-212. `safe_path.rs` already holds the path checks. | nice | M |
-| G14 | send/reply/forward | `html=true` rejected on all three. Python set `HTMLBody`. | client/mail.py:285-292, 331-335, 361-366 | contracts.rs:262-268, 283, 317, 331 | nice | M |
-| G15 | reply_mail | `attachments` rejected on reply. | client/mail.py:314-345 | contracts.rs:210-221, 317 | nice | M |
-| G16 | move_mail | Result key renamed: Python `new_entry_id`, Rust `entry_id` (plus `store_id`). Clients written against Python read nothing. | client/mail.py:379-383 | modify.rs:121-146 | nice | S |
-| G17 | save_attachments | Result shape differs. Python `{status, count, files[paths], output_dir}`; Rust `{done, saved}` (and `not_done` on failure). | client/mail.py:415-481 | attachments.rs:171-211 | nice | S |
+| G13 | send_mail | **FIXED (unit-tested only, not run live; max 10 files / 20 MiB, profile paths only, executables refused).** Was: `attachments` rejected ("not supported yet"). Python attached validated paths under the user profile. | client/mail.py:264-311, utils/paths.py:38-60 | contracts.rs:199-202, 262-272, compose.rs:195-212. `safe_path.rs` already holds the path checks. | nice | M |
+| G14 | send/reply/forward | **FIXED (unit-tested only, not run live; prompt says body is HTML, hash covers the source).** Was: `html=true` rejected on all three. Python set `HTMLBody`. | client/mail.py:285-292, 331-335, 361-366 | contracts.rs:262-268, 283, 317, 331 | nice | M |
+| G15 | reply_mail | **FIXED (unit-tested only, not run live).** Was: `attachments` rejected on reply. | client/mail.py:314-345 | contracts.rs:210-221, 317 | nice | M |
+| G16 | move_mail | **RECLASSIFIED deliberate (D21).** Result key renamed: Python `new_entry_id`, Rust `entry_id` (plus `store_id`). Clients written against Python read nothing. | client/mail.py:379-383 | modify.rs:121-146 | nice | S |
+| G17 | save_attachments | **RECLASSIFIED deliberate (D22).** Result shape differs. Python `{status, count, files[paths], output_dir}`; Rust `{done, saved}` (and `not_done` on failure). | client/mail.py:415-481 | attachments.rs:171-211 | nice | S |
 
 ### Folders, account
 
@@ -114,6 +114,8 @@ All are recorded as decisions in `HANDOFF.md`, `docs/DECISIONS.md`, `docs/CONFIR
 | D18 | list_events | `end` must be after `start`; results carry the local UTC offset. | client/calendar.py:81-120 | schedule.rs:176-184 | deliberate | n/a |
 | D19 | every write | Default server mode is `read-only`; limits are prompts (speed bumps), not walls. | none | policy.rs, CLAUDE.md | deliberate | n/a |
 | D20 | tool surface | Rust-only tools: `outlook_get_thread` (exact ConversationID, trimmed quotes, bounded), `outlook_send_draft`, `outlook_check_send`, `outlook_check_action`, `outlook_cancel_meeting` (Python deleted meetings without telling attendees), `outlook_update_meeting`, `outlook_rust_status`. | none | lib.rs:485-1050 | deliberate | n/a |
+| D21 | move_mail | Result key is `entry_id` (a new short handle), not Python's raw `new_entry_id`: the server rewrites IDs into handles (D01), so a raw ID would leak. Formerly G16. | client/mail.py:379-383 | modify.rs:121-146 | deliberate | n/a |
+| D22 | save_attachments | Result is `{done, saved}` (`not_done` on failure) from the confirmed-actions design, not Python's `{status, count, files, output_dir}`. Formerly G17. | client/mail.py:415-481 | attachments.rs:171-211 | deliberate | n/a |
 
 ## 3. Untested-live (verified against fakes, docs or unit tests only)
 

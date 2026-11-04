@@ -528,7 +528,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Read one Outlook Classic email. Pass the short entry_id handle returned by search/list (e.g. m1); legacy raw EntryIDs also work. Bounded plain-text body; HTML disabled.",
+        description = "Read one Outlook Classic email. Pass the short entry_id handle returned by search/list (e.g. m1); legacy raw EntryIDs also work. Bounded plain-text body; include_html=true also returns the raw HTML source as html_body (untrusted text, same window).",
         meta = ui::tool_meta("mail-view")
     )]
     async fn outlook_get_mail(
@@ -677,7 +677,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Compose a plain-text email and send it ONLY after the user approves a preview shown by their client (recipients, subject, body). With save_only, or when the server is not in full mode, it saves to Drafts and says so; check `sent` in the result. Attachments and HTML are not supported yet. Limits (many recipients, many sends per hour) trigger an extra user prompt.",
+        description = "Compose an email (plain text, or HTML with html=true) and send it ONLY after the user approves a preview shown by their client (recipients, subject, body, every attachment). Optional attachments are file paths inside the user profile. With save_only, or when the server is not in full mode, it saves to Drafts and says so; check `sent` in the result. Limits (many recipients, many sends per hour) trigger an extra user prompt.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -702,7 +702,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Reply to a message (reply_all optional) in plain text and send it ONLY after the user approves a preview. Otherwise saves to Drafts; check `sent` in the result.",
+        description = "Reply to a message (reply_all optional; html and attachments optional) and send it ONLY after the user approves a preview. Otherwise saves to Drafts; check `sent` in the result.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -727,7 +727,7 @@ impl OutlookMcp {
     }
 
     #[tool(
-        description = "Forward a message to new recipients in plain text and send it ONLY after the user approves a preview that notes existing content is leaving the mailbox. Otherwise saves to Drafts; check `sent` in the result.",
+        description = "Forward a message to new recipients (html optional) and send it ONLY after the user approves a preview that notes existing content is leaving the mailbox. Otherwise saves to Drafts; check `sent` in the result.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1051,7 +1051,7 @@ impl OutlookMcp {
     }
 }
 
-const INSTRUCTIONS: &str = "Experimental Outlook Classic MCP; read-only unless the user started the server in a wider permission mode (see outlook_rust_status). Requires locally running Outlook Classic on Windows. No sends/deletes or OST parsing. Search/list results contain short session-scoped entry_id handles instead of raw COM IDs; fetch a selected message with outlook_get_mail. Responses are compact JSON. Do not claim this build has passed live Outlook testing.";
+const INSTRUCTIONS: &str = "Experimental Outlook Classic MCP; read-only unless the user started the server in a wider permission mode (see outlook_rust_status). Requires locally running Outlook Classic on Windows. Writes (send, delete, rules, meeting changes) need the server in a wider mode and a person approving a prompt; see outlook_rust_status. No OST parsing. Search/list results contain short session-scoped entry_id handles instead of raw COM IDs; fetch a selected message with outlook_get_mail. Responses are compact JSON. Do not claim this build has passed live Outlook testing.";
 
 #[tool_handler]
 impl ServerHandler for OutlookMcp {

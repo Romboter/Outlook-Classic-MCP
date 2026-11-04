@@ -7,7 +7,7 @@
 //! - any failure from `Send()` onward is reported as an unknown outcome.
 use super::mailbox::{default_folder, optional_text};
 use super::win;
-use crate::send::{Addr, DraftRef, PrepareRequest, Preview};
+use crate::send::{Addr, AttachmentInfo, DraftRef, PrepareRequest, Preview};
 use crate::ticket::{NOT_SENT, UNKNOWN_OUTCOME};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -22,10 +22,12 @@ const OL_FOLDER_OUTBOX: i32 = 4;
 const OL_FOLDER_SENT: i32 = 5;
 const OL_FOLDER_DRAFTS: i32 = 16;
 const OL_TEXT: i32 = 1;
+const OL_FORMAT_HTML: i32 = 2;
 const STAMP: &str = "OutlookMcpSendId";
 const SMTP_PROPTAG: &str = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E";
 const EXCERPT_CHARS: usize = 600;
 const MAX_RECIPIENTS: i32 = 500;
+const MAX_ATTACHMENTS: i32 = 100;
 
 pub(super) fn fnv1a(text: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
@@ -124,7 +126,56 @@ fn sender_of(namespace: &IDispatch) -> String {
     optional_text(&entry, "Address").to_ascii_lowercase()
 }
 
-fn canonical(recipients: &[Addr], subject: &str, body: &str) -> String {
+/// Name and size of every file on the item.
+fn attachments_of(item: &IDispatch) -> Result<Vec<AttachmentInfo>> {
+    let collection = win::object_property(item, "Attachments")?;
+    let count = win::int_property(&collection, "Count")?.clamp(0, MAX_ATTACHMENTS);
+    let mut out = Vec::new();
+    for i in 1..=count {
+        let a = win::method_object(&collection, "Item", vec![VARIANT::from(i)])?;
+        out.push(AttachmentInfo {
+            name: optional_text(&a, "FileName"),
+            size: u64::try_from(win::int_property(&a, "Size").unwrap_or(0)).unwrap_or(0),
+        });
+    }
+    Ok(out)
+}
+
+/// Add already-validated files. Nothing is saved if one fails.
+fn attach_files(item: &IDispatch, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let collection = win::object_property(item, "Attachments")?;
+    for path in paths {
+        win::invoke(
+            &collection,
+            "Add",
+            DISPATCH_METHOD,
+            vec![VARIANT::from(path.as_str())],
+        )
+        .context("could not attach a file; nothing was saved")?;
+    }
+    Ok(())
+}
+
+/// Prepend `body` (HTML) to the HTML of a reply or forward. Never loads remote content.
+fn put_html_above(item: &IDispatch, body: &str) -> Result<()> {
+    let quoted = optional_text(item, "HTMLBody");
+    win::put_property(
+        item,
+        "HTMLBody",
+        VARIANT::from(format!("{body}<br><br>{quoted}").as_str()),
+    )
+}
+
+fn canonical(
+    recipients: &[Addr],
+    subject: &str,
+    body: &str,
+    html_source: Option<&str>,
+    attachments: &[AttachmentInfo],
+) -> String {
     let mut text = String::new();
     for r in recipients {
         text.push_str(&format!("{}:{}\n", r.kind, r.address));
@@ -132,6 +183,15 @@ fn canonical(recipients: &[Addr], subject: &str, body: &str) -> String {
     text.push_str(subject);
     text.push('\n');
     text.push_str(&body.replace("\r\n", "\n"));
+    // The HTML source is hashed too: markup (such as a link target) can change
+    // without changing the plain-text rendering the person approved.
+    if let Some(source) = html_source {
+        text.push_str("\nHTML:");
+        text.push_str(&source.replace("\r\n", "\n"));
+    }
+    for a in attachments {
+        text.push_str(&format!("\nATT:{}:{}", a.name, a.size));
+    }
     text
 }
 
@@ -144,10 +204,21 @@ fn preview_of(
     let recipients = recipients_of(item)?;
     let subject = optional_text(item, "Subject");
     let body = optional_text(item, "Body");
+    let html = win::int_property(item, "BodyFormat").unwrap_or(0) == OL_FORMAT_HTML;
+    let html_source = html.then(|| optional_text(item, "HTMLBody"));
+    let attachments = attachments_of(item)?;
     Ok(Preview {
         send_id: send_id.to_string(),
         sender: sender_of(namespace),
-        hash: fnv1a(&canonical(&recipients, &subject, &body)),
+        hash: fnv1a(&canonical(
+            &recipients,
+            &subject,
+            &body,
+            html_source.as_deref(),
+            &attachments,
+        )),
+        html,
+        attachments,
         recipients,
         subject,
         body_excerpt: body
@@ -198,15 +269,20 @@ pub(super) fn prepare(
             subject,
             body,
             importance,
+            html,
+            attachments,
         } => {
             let item =
                 win::method_object(application, "CreateItem", vec![VARIANT::from(OL_MAIL_ITEM)])?;
-            win::put_property(&item, "BodyFormat", VARIANT::from(1i32))?;
+            let format = if *html { OL_FORMAT_HTML } else { OL_TEXT };
+            win::put_property(&item, "BodyFormat", VARIANT::from(format))?;
             set_recipients(&item, "To", to)?;
             set_recipients(&item, "CC", cc)?;
             set_recipients(&item, "BCC", bcc)?;
             win::put_property(&item, "Subject", VARIANT::from(subject.as_str()))?;
-            win::put_property(&item, "Body", VARIANT::from(body.as_str()))?;
+            let body_property = if *html { "HTMLBody" } else { "Body" };
+            win::put_property(&item, body_property, VARIANT::from(body.as_str()))?;
+            attach_files(&item, attachments)?;
             let level = match importance.as_str() {
                 "low" => 0i32,
                 "high" => 2,
@@ -219,6 +295,8 @@ pub(super) fn prepare(
             draft_of,
             body,
             reply_all,
+            html,
+            attachments,
         } => {
             let source = mail_by_id(namespace, &resolve_source(draft_of)?)?;
             let reply = win::method_object(
@@ -226,12 +304,17 @@ pub(super) fn prepare(
                 if *reply_all { "ReplyAll" } else { "Reply" },
                 vec![],
             )?;
-            let quoted = optional_text(&reply, "Body");
-            win::put_property(
-                &reply,
-                "Body",
-                VARIANT::from(format!("{body}\n\n{quoted}").as_str()),
-            )?;
+            if *html {
+                put_html_above(&reply, body)?;
+            } else {
+                let quoted = optional_text(&reply, "Body");
+                win::put_property(
+                    &reply,
+                    "Body",
+                    VARIANT::from(format!("{body}\n\n{quoted}").as_str()),
+                )?;
+            }
+            attach_files(&reply, attachments)?;
             (reply, if *reply_all { "reply_all" } else { "reply" })
         }
         PrepareRequest::Forward {
@@ -239,12 +322,15 @@ pub(super) fn prepare(
             to,
             cc,
             body,
+            html,
         } => {
             let source = mail_by_id(namespace, &resolve_source(draft_of)?)?;
             let forward = win::method_object(&source, "Forward", vec![])?;
             set_recipients(&forward, "To", to)?;
             set_recipients(&forward, "CC", cc)?;
-            if !body.is_empty() {
+            if !body.is_empty() && *html {
+                put_html_above(&forward, body)?;
+            } else if !body.is_empty() {
                 let quoted = optional_text(&forward, "Body");
                 win::put_property(
                     &forward,

@@ -59,9 +59,11 @@ pub struct GetMailParams {
     pub store_id: Option<String>,
     /// Include plain-text email body (default true).
     pub include_body: Option<bool>,
-    /// HTML retrieval is deliberately disabled until explicit safety review.
+    /// Also return the raw HTML source as `html_body` (default false). It is
+    /// untrusted text, never rendered or fetched, and uses the same
+    /// `max_body_chars` / `body_offset` window as the plain body.
     pub include_html: Option<bool>,
-    /// Plain-text body budget (default 4000, maximum 12000 characters).
+    /// Body budget per field (default 4000, maximum 12000 characters).
     pub max_body_chars: Option<u32>,
     /// Start the body at this character offset (default 0). Use the previous
     /// result's `body_next_offset` to read a long body in pages.
@@ -199,9 +201,9 @@ pub struct SendMailParams {
     pub body: String,
     pub cc: Option<Vec<String>>,
     pub bcc: Option<Vec<String>>,
-    /// HTML bodies are not supported yet; must be false or omitted.
+    /// Treat `body` as HTML (default false). The approval prompt says so and shows a plain-text rendering.
     pub html: Option<bool>,
-    /// Attachments are not supported yet; must be empty or omitted.
+    /// Paths of files to attach: existing regular files inside the user profile, at most 10 and 20 MiB in total; executables and scripts are refused. The approval prompt lists each file.
     pub attachments: Option<Vec<String>>,
     /// low, normal (default) or high.
     pub importance: Option<String>,
@@ -218,7 +220,9 @@ pub struct ReplyMailParams {
     pub body: String,
     /// Reply to everyone (default false).
     pub reply_all: Option<bool>,
+    /// Treat `body` as HTML (default false).
     pub html: Option<bool>,
+    /// Files to attach (same rules and limits as `outlook_send_mail`).
     pub attachments: Option<Vec<String>>,
 }
 
@@ -231,6 +235,7 @@ pub struct ForwardMailParams {
     pub cc: Option<Vec<String>>,
     /// Optional plain-text note above the forwarded message.
     pub body: Option<String>,
+    /// Treat `body` as HTML (default false).
     pub html: Option<bool>,
 }
 
@@ -262,17 +267,12 @@ fn checked_addresses(list: &[String], what: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn unsupported_html_attachments(
-    html: Option<bool>,
-    attachments: Option<&Vec<String>>,
-) -> Result<(), String> {
-    if html == Some(true) {
-        return Err("HTML bodies are not supported yet; send plain text".into());
-    }
-    if attachments.is_some_and(|a| !a.is_empty()) {
-        return Err("attachments are not supported yet".into());
-    }
-    Ok(())
+/// Validate outgoing attachment paths (user profile only) and return the
+/// canonical paths to attach.
+fn checked_attachments(attachments: Option<&Vec<String>>) -> Result<Vec<String>, String> {
+    let requested = attachments.map(Vec::as_slice).unwrap_or_default();
+    crate::safe_path::resolve_attachment_files(requested, &crate::safe_path::default_roots())
+        .map(|files| files.into_iter().map(|f| f.path).collect())
 }
 
 fn checked_body(body: &str) -> Result<(), String> {
@@ -283,7 +283,7 @@ fn checked_body(body: &str) -> Result<(), String> {
 }
 
 pub fn prepare_send_mail(x: &SendMailParams) -> Result<PrepareRequest, String> {
-    unsupported_html_attachments(x.html, x.attachments.as_ref())?;
+    let attachments = checked_attachments(x.attachments.as_ref())?;
     if x.to.is_empty() {
         return Err("at least one recipient is required".into());
     }
@@ -313,11 +313,13 @@ pub fn prepare_send_mail(x: &SendMailParams) -> Result<PrepareRequest, String> {
         subject: x.subject.clone(),
         body: x.body.clone(),
         importance,
+        html: x.html.unwrap_or(false),
+        attachments,
     })
 }
 
 pub fn prepare_reply_mail(x: &ReplyMailParams) -> Result<PrepareRequest, String> {
-    unsupported_html_attachments(x.html, x.attachments.as_ref())?;
+    let attachments = checked_attachments(x.attachments.as_ref())?;
     checked_id(&x.entry_id, x.store_id.as_deref())?;
     checked_body(&x.body)?;
     Ok(PrepareRequest::Reply {
@@ -327,11 +329,12 @@ pub fn prepare_reply_mail(x: &ReplyMailParams) -> Result<PrepareRequest, String>
         },
         body: x.body.clone(),
         reply_all: x.reply_all.unwrap_or(false),
+        html: x.html.unwrap_or(false),
+        attachments,
     })
 }
 
 pub fn prepare_forward_mail(x: &ForwardMailParams) -> Result<PrepareRequest, String> {
-    unsupported_html_attachments(x.html, None)?;
     checked_id(&x.entry_id, x.store_id.as_deref())?;
     if x.to.is_empty() {
         return Err("at least one recipient is required".into());
@@ -349,6 +352,7 @@ pub fn prepare_forward_mail(x: &ForwardMailParams) -> Result<PrepareRequest, Str
         to: x.to.clone(),
         cc,
         body,
+        html: x.html.unwrap_or(false),
     })
 }
 
@@ -1052,9 +1056,6 @@ pub fn validate_command(command: &MailCommand) -> Result<(), String> {
             if x.entry_id.is_empty() || x.entry_id.len() > 4096 {
                 return Err("invalid EntryID length".into());
             }
-            if x.include_html.unwrap_or(false) {
-                return Err("HTML bodies are disabled in this read-only prototype".into());
-            }
             if x.max_body_chars.unwrap_or(4000) > 12000 {
                 return Err("max_body_chars must be <= 12000".into());
             }
@@ -1120,6 +1121,20 @@ pub fn escape_dasl(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn get_mail_accepts_include_html_within_the_same_body_ceiling() {
+        let params = |chars| GetMailParams {
+            entry_id: "m1".into(),
+            store_id: None,
+            include_body: None,
+            include_html: Some(true),
+            max_body_chars: Some(chars),
+            body_offset: None,
+        };
+        assert!(validate_command(&MailCommand::GetMail(params(12000))).is_ok());
+        assert!(validate_command(&MailCommand::GetMail(params(12001))).is_err());
+    }
+
     #[test]
     fn received_filter_builds_inclusive_local_bounds() {
         assert_eq!(received_filter(None, None).unwrap(), "");
@@ -1546,6 +1561,8 @@ mod tests {
             subject: String::new(),
             body_excerpt: String::new(),
             body_chars: 0,
+            html: false,
+            attachments: vec![],
             hash: String::new(),
             kind: "new".into(),
         };
@@ -1553,6 +1570,107 @@ mod tests {
             MailCommand::ComposeSend { draft, preview }.capability(),
             Capability::Send
         );
+    }
+
+    #[test]
+    fn html_flag_is_carried_on_send_reply_and_forward() {
+        let send = |html| SendMailParams {
+            to: vec!["a@b.example".into()],
+            subject: "Hi".into(),
+            body: "<b>x</b>".into(),
+            cc: None,
+            bcc: None,
+            html,
+            attachments: None,
+            importance: None,
+            save_only: None,
+        };
+        let flag = |r: PrepareRequest| match r {
+            PrepareRequest::New { html, .. }
+            | PrepareRequest::Reply { html, .. }
+            | PrepareRequest::Forward { html, .. } => html,
+        };
+        assert!(flag(prepare_send_mail(&send(Some(true))).unwrap()));
+        assert!(!flag(prepare_send_mail(&send(None)).unwrap()));
+        let reply = |html| ReplyMailParams {
+            entry_id: "abc".into(),
+            store_id: None,
+            body: "x".into(),
+            reply_all: None,
+            html,
+            attachments: None,
+        };
+        assert!(flag(prepare_reply_mail(&reply(Some(true))).unwrap()));
+        assert!(!flag(prepare_reply_mail(&reply(Some(false))).unwrap()));
+        let forward = |html| ForwardMailParams {
+            entry_id: "abc".into(),
+            store_id: None,
+            to: vec!["a@b.example".into()],
+            cc: None,
+            body: None,
+            html,
+        };
+        assert!(flag(prepare_forward_mail(&forward(Some(true))).unwrap()));
+        assert!(!flag(prepare_forward_mail(&forward(None)).unwrap()));
+    }
+
+    #[test]
+    fn attachment_paths_are_validated_on_send_and_reply() {
+        let send = |attachments| SendMailParams {
+            to: vec!["a@b.example".into()],
+            subject: "Hi".into(),
+            body: "x".into(),
+            cc: None,
+            bcc: None,
+            html: None,
+            attachments: Some(attachments),
+            importance: None,
+            save_only: None,
+        };
+        let reply = |attachments| ReplyMailParams {
+            entry_id: "abc".into(),
+            store_id: None,
+            body: "x".into(),
+            reply_all: None,
+            html: None,
+            attachments: Some(attachments),
+        };
+        // Empty list is fine; a missing file, traversal and too many are not.
+        assert!(prepare_send_mail(&send(vec![])).is_ok());
+        assert!(prepare_reply_mail(&reply(vec![])).is_ok());
+        for bad in [
+            vec!["C:/definitely/not/here/x.txt".to_string()],
+            vec!["C:/Users/../Windows/win.ini".to_string()],
+            vec![String::new()],
+            vec!["x.txt".to_string(); crate::safe_path::MAX_ATTACH_FILES + 1],
+        ] {
+            assert!(prepare_send_mail(&send(bad.clone())).is_err(), "{bad:?}");
+            assert!(prepare_reply_mail(&reply(bad.clone())).is_err(), "{bad:?}");
+        }
+        // A real file inside the profile passes; an executable beside it does not.
+        let Some(profile) = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from) else {
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("outlook-mcp-contract-{}", std::process::id()));
+        if !dir.starts_with(&profile) || std::fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let (ok, exe) = (dir.join("a.txt"), dir.join("run.exe"));
+        std::fs::write(&ok, b"hi").unwrap();
+        std::fs::write(&exe, b"MZ").unwrap();
+        let text = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        assert!(prepare_send_mail(&send(vec![text(&ok)])).is_ok());
+        let paths = |r: PrepareRequest| match r {
+            PrepareRequest::Reply { attachments, .. } => attachments,
+            _ => vec![],
+        };
+        assert_eq!(
+            paths(prepare_reply_mail(&reply(vec![text(&ok)])).unwrap()).len(),
+            1
+        );
+        let error = prepare_send_mail(&send(vec![text(&exe)])).unwrap_err();
+        assert!(error.starts_with("run.exe was not attached"), "{error}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1570,10 +1688,7 @@ mod tests {
         };
         assert!(prepare_send_mail(&base()).is_ok());
         let mut x = base();
-        x.html = Some(true);
-        assert!(prepare_send_mail(&x).is_err());
-        let mut x = base();
-        x.attachments = Some(vec!["C:/x.txt".into()]);
+        x.attachments = Some(vec!["C:/definitely/not/here/x.txt".into()]);
         assert!(prepare_send_mail(&x).is_err());
         let mut x = base();
         x.to = vec![];

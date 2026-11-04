@@ -134,12 +134,15 @@ fn build_invite(application: &IDispatch, payload: &Value) -> Result<(IDispatch, 
     if let Some(body) = text(payload, "body") {
         win::put_property(&item, "Body", VARIANT::from(body.as_str()))?;
     }
-    win::put_property(&item, "ReminderSet", VARIANT::from(true))?;
-    win::put_property(
-        &item,
-        "ReminderMinutesBeforeStart",
-        VARIANT::from(payload["reminder_minutes"].as_i64().unwrap_or(15) as i32),
-    )?;
+    let reminder = !payload["no_reminder"].as_bool().unwrap_or(false);
+    win::put_property(&item, "ReminderSet", VARIANT::from(reminder))?;
+    if reminder {
+        win::put_property(
+            &item,
+            "ReminderMinutesBeforeStart",
+            VARIANT::from(payload["reminder_minutes"].as_i64().unwrap_or(15) as i32),
+        )?;
+    }
     win::put_property(&item, "MeetingStatus", VARIANT::from(OL_MEETING))?;
     let recipients = win::object_property(&item, "Recipients")?;
     let wanted: Vec<&str> = payload["attendees"]

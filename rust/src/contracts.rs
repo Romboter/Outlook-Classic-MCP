@@ -410,6 +410,8 @@ pub struct CreateEventParams {
     pub is_online_meeting: Option<bool>,
     /// Minutes before start (default 15).
     pub reminder_minutes: Option<u32>,
+    /// Create the event with no reminder (default false). Cannot be combined with reminder_minutes.
+    pub no_reminder: Option<bool>,
     pub recurrence: Option<RecurrenceParams>,
 }
 
@@ -483,6 +485,9 @@ pub fn validate_create_event(x: &CreateEventParams) -> Result<(), String> {
     }
     checked_free_text(x.location.as_deref().unwrap_or(""), "location", 255)?;
     checked_free_text(x.body.as_deref().unwrap_or(""), "body", 100_000)?;
+    if x.no_reminder.unwrap_or(false) && x.reminder_minutes.is_some() {
+        return Err("give reminder_minutes or no_reminder, not both".into());
+    }
     if x.reminder_minutes.is_some_and(|m| m > 525_600) {
         return Err("reminder_minutes must be at most 525600".into());
     }
@@ -617,6 +622,7 @@ pub fn prepare_invite_meeting(x: &CreateEventParams) -> Result<ActionTarget, Str
         "subject": x.subject, "start": x.start, "end": x.end,
         "location": x.location, "body": x.body, "attendees": attendees,
         "reminder_minutes": x.reminder_minutes.unwrap_or(15),
+        "no_reminder": x.no_reminder.unwrap_or(false),
     });
     Ok(ActionTarget {
         kind: ActionKind::InviteMeeting,
@@ -1264,6 +1270,7 @@ mod tests {
             attendees: None,
             is_online_meeting: None,
             reminder_minutes: None,
+            no_reminder: None,
             recurrence: None,
         };
         assert!(validate_create_event(&event()).is_ok());
@@ -1297,8 +1304,14 @@ mod tests {
             attendees: None,
             is_online_meeting: None,
             reminder_minutes: None,
+            no_reminder: None,
             recurrence: None,
         };
+        let mut x = base();
+        x.no_reminder = Some(true);
+        assert!(validate_create_event(&x).is_ok());
+        x.reminder_minutes = Some(10);
+        assert!(validate_create_event(&x).is_err());
         let mut x = base();
         x.attendees = Some(vec!["a@b.example".into()]);
         assert!(
@@ -1715,6 +1728,7 @@ mod tests {
             attendees: Some(vec!["A@B.example".into(), "a@b.example".into()]),
             is_online_meeting: None,
             reminder_minutes: None,
+            no_reminder: None,
             recurrence: None,
         };
         let target = prepare_invite_meeting(&base()).unwrap();

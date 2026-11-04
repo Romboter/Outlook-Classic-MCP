@@ -152,12 +152,15 @@ pub(super) fn create_event(
     if let Some(body) = &params.body {
         put_text(&event, "Body", body)?;
     }
-    win::put_property(&event, "ReminderSet", VARIANT::from(true))?;
-    win::put_property(
-        &event,
-        "ReminderMinutesBeforeStart",
-        VARIANT::from(params.reminder_minutes.unwrap_or(15) as i32),
-    )?;
+    let reminder = !params.no_reminder.unwrap_or(false);
+    win::put_property(&event, "ReminderSet", VARIANT::from(reminder))?;
+    if reminder {
+        win::put_property(
+            &event,
+            "ReminderMinutesBeforeStart",
+            VARIANT::from(params.reminder_minutes.unwrap_or(15) as i32),
+        )?;
+    }
     if let Some(spec) = &params.recurrence {
         apply_recurrence(&event, spec)?;
     }

@@ -4,7 +4,7 @@
 
 This is the **Romboter fork** and a **fork-specific Rust rewrite**. Never open a pull request against `anasahmed07/Outlook-Classic-MCP`; never sync, pull, fetch, rebase, or cherry-pick from that upstream repository as part of this rewrite. All feature branches and pull requests must be entirely within `Romboter/Outlook-Classic-MCP`. Target this fork's `main` for independent changes or an appropriate **fork-owned feature branch** for stacked PRs while prerequisites are still unmerged. Never target upstream.
 
-Do not commit directly to `main`. Create a branch for each issue or coherent change. Open a PR for review. Do not merge without explicit user direction.
+Do not commit to `main`. **No pull requests** (owner decision, 2026-11-03): do the work on `rust/development`, run the gates, and commit straight to `rust/development` **only when the owner says to commit**. Never touch `main` or upstream.
 
 ## Work order and scope
 

@@ -1,6 +1,6 @@
 # Implementation status and release gates
 
-**Updated 2026-11-03.** The Rust work is merged into the fork's `rust/development` branch (PRs #23 to #43, 2026-11-03). It is **not** in `main`, and no client or plugin config points at it: the Python server is unaffected. Recheck issue states and the PR list at review time.
+**Updated 2026-11-03 (end of session 4).** The Rust work is merged into the fork's `rust/development` branch (PRs #23 to #46, then direct commits for G11, G10, G22, G25, G07, G08, G31, G26; no more PRs). It is **not** in `main`, and no client or plugin config points at it: the Python server is unaffected. Recheck issue states and the PR list at review time.
 
 | Area | Code state | Verification state |
 | --- | --- | --- |
@@ -19,11 +19,12 @@
 - [Owner-supplied sanitized report](../rust/compatibility/live-evidence-2026-11-02.md) and later session notes record **shapes, counts and timings only**; no mailbox content is kept. CI alone cannot verify Outlook COM behavior.
 - Not tested live: shared or delegated mailboxes and calendars, PST or archive stores, non-default stores, all-day and daylight-saving-boundary events, live reply and forward, recurring-series deletes, attendees other than the owner.
 - `outlook_rust_status.outlook_connected` is a static value, not a connection check.
+- Session 4 changes were checked live and read-only (folder aliases and 11 stores, body paging, folder row fields, whoami, `scope=from` SMTP (weak sample, no Exchange sender confirmed), `next_offset`, `get_event` fields) except `no_reminder` (G26), which is unit-tested only. No live test changed the mailbox.
 - Timings are single observations, not speed claims.
 
 ## Recommended next sequence
 
-1. Work down [PARITY-GAPS.md](PARITY-GAPS.md), highest daily-use gaps first (next: G03 multi-word search, then G05 and G04 mail fields).
+1. Work down [PARITY-GAPS.md](PARITY-GAPS.md), highest daily-use gaps first (done through G11, G10, G22 (partial), G25, G07, G08, G31 (partial), G26; open: G12, G09, G13 to G17, G27 to G29, G32 to G36 — see the ranked file; G16, G17 and G29 are probably deliberate).
 2. Rebuild the release exe and try the tools in a normal session; confirm whether the client shows approval prompts.
 3. [Benchmark searches](runbooks/05-search-benchmark.md) and [validate conversation reads](runbooks/07-thread-validation.md) on more stores.
 4. Release gates under #11 (package, trial deploy, rollback) only after the owner says so; never infer release readiness from CI.
